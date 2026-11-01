@@ -1,11 +1,11 @@
 // =============================================================================
-// tests/test_fota_config.cpp - FotaConfig 映射单元测试 (CGW-FOTA-DSN-CR-004)
+// tests/test_fota_config.cpp - FotaConfig 映射单元测试 (CCU-FOTA-DSN-CR-004)
 // =============================================================================
 // 覆盖每个键的缺省值、类型、边界、未知字段与跨字段校验；logConfigFrom 的
-// common.log.* / fota.log.* 映射。通过 cgw-framework-config 的 Config::load 构造
+// common.log.* / fota.log.* 映射。通过 ccu-framework-config 的 Config::load 构造
 // 不可变快照，再经 FotaConfig::from / logConfigFrom 验证。
 
-#include "cgw/fota/config/fota_config.hpp"
+#include "ccu/fota/config/fota_config.hpp"
 #include "config.h"
 #include "config_types.h"
 #include "log_types.h"
@@ -13,14 +13,14 @@
 
 #include <gtest/gtest.h>
 
-using namespace cgw_fota;
-using cgw::fw::config::Config;
-using cgw::fw::config::ConfigException;
-using cgw::fw::config::LoadOptions;
-using cgw::fw::config::ConfigSnapshot;
-using cgw::fw::log::LogConfig;
-using cgw::fw::log::LogLevel;
-using cgw_fota_test::TempDir;
+using namespace ccu_fota;
+using ccu::fw::config::Config;
+using ccu::fw::config::ConfigException;
+using ccu::fw::config::LoadOptions;
+using ccu::fw::config::ConfigSnapshot;
+using ccu::fw::log::LogConfig;
+using ccu::fw::log::LogLevel;
+using ccu_fota_test::TempDir;
 
 namespace {
 
@@ -83,7 +83,7 @@ TEST(FotaConfigTest, OverridesMapped) {
 }
 
 // ---------------------------------------------------------------------------
-// CGW-FOTA-DSN-CR-007: someip 配置与 SomeIpConfig 构建
+// CCU-FOTA-DSN-CR-007: someip 配置与 SomeIpConfig 构建
 // ---------------------------------------------------------------------------
 TEST(FotaConfigTest, SomeIpConfigFromSnapshot) {
     TempDir root;
@@ -105,26 +105,26 @@ TEST(FotaConfigTest, SomeIpConfigFromSnapshot) {
         "    max_providers: 4\n"
         "    max_clients: 4\n"
         "    shutdown_timeout_ms: 3000\n"
-        "    registry_profile: cgw-fota-prod\n");
+        "    registry_profile: ccu-fota-prod\n");
     root.writeFile("conf.d/fota.yaml",
         "fota:\n  log: {}\n");
-    auto snap = cgw::fw::config::Config::load("fota", cgw::fw::config::LoadOptions{{root.path}, TempDir().path});
+    auto snap = ccu::fw::config::Config::load("fota", ccu::fw::config::LoadOptions{{root.path}, TempDir().path});
 
     FotaConfig c = FotaConfig::from(*snap);
 
     auto someIpCfg = FotaConfig::someIpConfigFrom(*snap);
-    EXPECT_EQ(someIpCfg.application, "cgw-fota");
-    EXPECT_EQ(someIpCfg.routingMode, cgw::fw::someip::RoutingMode::Embedded);
+    EXPECT_EQ(someIpCfg.application, "ccu-fota");
+    EXPECT_EQ(someIpCfg.routingMode, ccu::fw::someip::RoutingMode::Embedded);
     EXPECT_EQ(someIpCfg.maxPayloadBytes, 65536u);
     EXPECT_EQ(someIpCfg.maxInflightCalls, 128u);
     EXPECT_EQ(someIpCfg.maxProviders, 4u);
     EXPECT_EQ(someIpCfg.maxClients, 4u);
     EXPECT_EQ(someIpCfg.shutdownTimeout.count(), 3000);
-    EXPECT_EQ(someIpCfg.registryProfile, "cgw-fota-prod");
+    EXPECT_EQ(someIpCfg.registryProfile, "ccu-fota-prod");
 }
 
 // ---------------------------------------------------------------------------
-// CGW-FOTA-DSN-CR-007: someip 未知键拒绝（fail-closed）
+// CCU-FOTA-DSN-CR-007: someip 未知键拒绝（fail-closed）
 // ---------------------------------------------------------------------------
 TEST(FotaConfigTest, SomeIpUnknownKeyRejected) {
     TempDir root;
@@ -227,7 +227,7 @@ TEST(FotaConfigTest, UnknownFieldsRejected) {
 }
 
 // ---------------------------------------------------------------------------
-// 类型错误 fail-closed（经 ConfigSnapshot::getInt64 抛 ConfigException CGW-FW-0004）
+// 类型错误 fail-closed（经 ConfigSnapshot::getInt64 抛 ConfigException CCU-FW-0004）
 // ---------------------------------------------------------------------------
 TEST(FotaConfigTest, TypeMismatchFailClosed) {
     // 整数字段传入非数字字符串 -> getInt64 解析失败

@@ -1,14 +1,14 @@
 // =============================================================================
 // tests/someip/clients_test.cpp
-// CGW-FOTA-DSN-CR-007 §测试设计 - DIAG/TBOX Client 适配器测试
+// CCU-FOTA-DSN-CR-007 §测试设计 - DIAG/TBOX Client 适配器测试
 // 覆盖：availability 状态机、VersionMismatch 不调用、sync 调用成功/失败、
 // timeout/cancel、late/duplicate response 不完成其他请求（framework 保证）。
 // 使用真实 SomeIpRuntime（FakeSomeIpBackend）+ InlineExecutor。
 // =============================================================================
 #include "fota_someip_test_util.h"
-#include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fw/someip/runtime.hpp"
-#include "cgw/fw/someip/types.hpp"
+#include "ccu/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fw/someip/runtime.hpp"
+#include "ccu/fw/someip/types.hpp"
 #include "constants.h"
 #include "data_models.h"
 #include <gtest/gtest.h>
@@ -16,9 +16,9 @@
 #include <thread>
 #include <string>
 
-using namespace cgw_fota;
-using namespace cgw_fota_test;
-namespace someip_fw = cgw::fw::someip;
+using namespace ccu_fota;
+using namespace ccu_fota_test;
+namespace someip_fw = ccu::fw::someip;
 
 namespace {
 

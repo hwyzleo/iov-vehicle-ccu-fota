@@ -1,9 +1,9 @@
 // =============================================================================
 // src/store/fota_state_store.cpp
-// CGW-FOTA 运行状态存储封装实现 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 运行状态存储封装实现 (CCU-FOTA-DSN-CR-005)
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 
 #include "constants.h"
 #include "fota_log_adapter.h"
@@ -11,7 +11,7 @@
 
 #include <chrono>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 
 namespace {
@@ -20,8 +20,8 @@ std::int64_t nowMs() {
                std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-// 将框架 StoreException code 映射为日志 error_code（CGW-FW-0101~0105）。
-std::string storeErrCode(const cgw::fw::store::StoreException& e) { return e.code; }
+// 将框架 StoreException code 映射为日志 error_code（CCU-FW-0101~0105）。
+std::string storeErrCode(const ccu::fw::store::StoreException& e) { return e.code; }
 
 void logStoreError(const char* event, const std::string& key,
                    const std::string& errorCode, const std::string& stage = "") {
@@ -37,7 +37,7 @@ void logStoreError(const char* event, const std::string& key,
 // ===========================================================================
 // 构造与打开
 // ===========================================================================
-FotaStateStore::FotaStateStore(cgw::fw::store::Store s, std::filesystem::path root,
+FotaStateStore::FotaStateStore(ccu::fw::store::Store s, std::filesystem::path root,
                                std::uint32_t dedupeMaxEntries, std::int64_t dedupeTtlMs)
     : store_(std::move(s))
     , root_(std::move(root))
@@ -47,16 +47,16 @@ FotaStateStore::FotaStateStore(cgw::fw::store::Store s, std::filesystem::path ro
 FotaStateStore FotaStateStore::open(const std::filesystem::path& root,
                                     std::uint32_t dedupeMaxEntries,
                                     std::int64_t dedupeTtlMs) {
-    cgw::fw::store::StoreOptions opts;
+    ccu::fw::store::StoreOptions opts;
     opts.root = root;
-    opts.flushMode = cgw::fw::store::FlushMode::Synchronous; // sequence/last_success/active_job 必须 durable
+    opts.flushMode = ccu::fw::store::FlushMode::Synchronous; // sequence/last_success/active_job 必须 durable
     // dedupe 初期也同步；后续 CR 可评估显式 debounce
 
-    auto openStore = [&]() -> cgw::fw::store::Store {
+    auto openStore = [&]() -> ccu::fw::store::Store {
         try {
-            return cgw::fw::store::Store::open("fota", opts);
-        } catch (const cgw::fw::store::StoreException& e) {
-            // CGW-FW-0101 路径/权限失败；CGW-FW-0103 lock 失败
+            return ccu::fw::store::Store::open("fota", opts);
+        } catch (const ccu::fw::store::StoreException& e) {
+            // CCU-FW-0101 路径/权限失败；CCU-FW-0103 lock 失败
             logStoreError(fota_events::STORE_OPEN_FAILED, "(root)", e.code, e.stage);
             throw; // fail-closed，不得切 /tmp
         }
@@ -104,7 +104,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
     bool exists = false;
     try {
         exists = store_.has(key);
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         // 0101/0102 路径/IO 错误 -> 损坏
         corruptionFlag = true;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, key, e.code, "has");
@@ -115,7 +115,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
     std::string env;
     try {
         env = store_.load<std::string>(key);
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         // 0104 type-mismatch（非 string），0101/0102 IO
         corruptionFlag = true;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, key, e.code, "load");
@@ -128,7 +128,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
     } catch (const StateDecodeError& e) {
         // envelope 损坏（截断/错 magic/错长度/minReader 过高）
         corruptionFlag = true;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CGW-FW-0104", "envelope");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CCU-FW-0104", "envelope");
         return;
     }
 
@@ -149,7 +149,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
             decodeFn(env);
         } catch (const StateDecodeError& e) {
             corruptionFlag = true;
-            logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CGW-FW-0104", "validate");
+            logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CCU-FW-0104", "validate");
         }
         return;
     }
@@ -160,7 +160,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
                             ".v" + std::to_string(h.schemaVersion);
     try {
         store_.save<std::string>(backupKey, env);
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         // 备份失败 -> 不迁移原 key，保留旧可恢复版本
         corruptionFlag = true;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, key, e.code, "backup");
@@ -173,9 +173,9 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
         store_.save<std::string>(key, encodeFn(s));
     } catch (const StateDecodeError& e) {
         corruptionFlag = true;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CGW-FW-0104", "migrate");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CCU-FW-0104", "migrate");
         return;
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         corruptionFlag = true;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, key, e.code, "rewrite");
         return;
@@ -187,7 +187,7 @@ void FotaStateStore::migrateAndValidate(const char* key, std::uint32_t currentVe
     } catch (const std::exception&) {
         // 迁移后验证失败：原 key 已被覆盖，但备份仍保留可恢复版本
         corruptionFlag = true;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CGW-FW-0104", "verify");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, key, "CCU-FW-0104", "verify");
         return;
     }
 
@@ -221,15 +221,15 @@ std::uint64_t FotaStateStore::allocateSnapshotSeq() {
         if (exists) {
             cur = decodeSequence(store_.load<std::string>(keys::SEQUENCE));
         }
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         sequenceBlocked_ = true;
         logStoreError(fota_events::STORE_SEQUENCE_FAILED, keys::SEQUENCE, e.code, "load");
         throw SeqAllocBlocked("sequence load failed", e.code);
     } catch (const StateDecodeError& e) {
         // 已部署设备序号损坏 -> 阻断，禁止自动归零
         sequenceBlocked_ = true;
-        logStoreError(fota_events::STORE_SEQUENCE_FAILED, keys::SEQUENCE, "CGW-FW-0104", "decode");
-        throw SeqAllocBlocked("sequence corrupted", "CGW-FW-0104");
+        logStoreError(fota_events::STORE_SEQUENCE_FAILED, keys::SEQUENCE, "CCU-FW-0104", "decode");
+        throw SeqAllocBlocked("sequence corrupted", "CCU-FW-0104");
     }
 
     // 首次初始化必须由“无既有部署状态”的明确条件判定（exists == false）。
@@ -255,7 +255,7 @@ std::uint64_t FotaStateStore::allocateSnapshotSeq() {
     try {
         // save() 完成 temp->fsync->rename->dir fsync 后才返回（同步 durable）。
         store_.save<std::string>(keys::SEQUENCE, encodeSequence(newState));
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         // 写入失败：序号未持久化，不得使用 -> 阻断
         sequenceBlocked_ = true;
         logStoreError(fota_events::STORE_SEQUENCE_FAILED, keys::SEQUENCE, e.code, "save");
@@ -288,14 +288,14 @@ std::optional<LastSuccessState> FotaStateStore::loadLastSuccess() {
     try {
         if (!store_.has(keys::LAST_SUCCESS)) return std::nullopt;
         return decodeLastSuccess(store_.load<std::string>(keys::LAST_SUCCESS));
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         // 损坏 -> 标记不可用，保留文件供诊断
         lastSuccessAvailable_ = false;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::LAST_SUCCESS, e.code, "load");
         return std::nullopt;
     } catch (const StateDecodeError&) {
         lastSuccessAvailable_ = false;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::LAST_SUCCESS, "CGW-FW-0104", "decode");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::LAST_SUCCESS, "CCU-FW-0104", "decode");
         return std::nullopt;
     }
 }
@@ -304,7 +304,7 @@ void FotaStateStore::saveLastSuccess(const LastSuccessState& s) {
     try {
         store_.save<std::string>(keys::LAST_SUCCESS, encodeLastSuccess(s));
         lastSuccessAvailable_ = true;
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::LAST_SUCCESS, e.code, "save");
         throw;
     }
@@ -332,7 +332,7 @@ DedupeState FotaStateStore::loadDedupe() {
         d.maxEntries = dedupeMaxEntries_;
         d.ttlMs = dedupeTtlMs_;
         return d;
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         dedupeAvailable_ = false;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::DEDUPE, e.code, "load");
         DedupeState empty;
@@ -341,7 +341,7 @@ DedupeState FotaStateStore::loadDedupe() {
         return empty;
     } catch (const StateDecodeError&) {
         dedupeAvailable_ = false;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::DEDUPE, "CGW-FW-0104", "decode");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::DEDUPE, "CCU-FW-0104", "decode");
         DedupeState empty;
         empty.maxEntries = dedupeMaxEntries_;
         empty.ttlMs = dedupeTtlMs_;
@@ -353,7 +353,7 @@ void FotaStateStore::saveDedupe(const DedupeState& s) {
     try {
         store_.save<std::string>(keys::DEDUPE, encodeDedupe(s));
         dedupeAvailable_ = true;
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::DEDUPE, e.code, "save");
         throw;
     }
@@ -367,13 +367,13 @@ std::optional<ActiveJobState> FotaStateStore::loadActiveJob() {
     try {
         if (!store_.has(keys::ACTIVE_JOB)) return std::nullopt;
         return decodeActiveJob(store_.load<std::string>(keys::ACTIVE_JOB));
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         activeJobCorrupted_ = true;
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::ACTIVE_JOB, e.code, "load");
         return std::nullopt;
     } catch (const StateDecodeError&) {
         activeJobCorrupted_ = true;
-        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::ACTIVE_JOB, "CGW-FW-0104", "decode");
+        logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::ACTIVE_JOB, "CCU-FW-0104", "decode");
         return std::nullopt;
     }
 }
@@ -381,7 +381,7 @@ std::optional<ActiveJobState> FotaStateStore::loadActiveJob() {
 void FotaStateStore::saveActiveJob(const ActiveJobState& s) {
     try {
         store_.save<std::string>(keys::ACTIVE_JOB, encodeActiveJob(s));
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::ACTIVE_JOB, e.code, "save");
         throw;
     }
@@ -390,11 +390,11 @@ void FotaStateStore::saveActiveJob(const ActiveJobState& s) {
 void FotaStateStore::removeActiveJob() {
     try {
         store_.remove(keys::ACTIVE_JOB);
-    } catch (const cgw::fw::store::StoreException& e) {
+    } catch (const ccu::fw::store::StoreException& e) {
         logStoreError(fota_events::STORE_MIGRATION_FAILED, keys::ACTIVE_JOB, e.code, "remove");
         throw;
     }
 }
 
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

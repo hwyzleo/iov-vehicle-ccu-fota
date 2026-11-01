@@ -1,20 +1,20 @@
 // =============================================================================
 // src/ota/fota_orchestrator.cpp
-// CGW-FOTA 车云 FOTA 编排器实现 (CGW-FOTA-DSN-CR-009 §13.4/§13.5 / CR-011)
+// CCU-FOTA 车云 FOTA 编排器实现 (CCU-FOTA-DSN-CR-009 §13.4/§13.5 / CR-011)
 // =============================================================================
 
-#include "cgw/fota/ota/fota_orchestrator.hpp"
-#include "cgw/fota/ota/state/state_proto.hpp"
-#include "cgw/fota/store/fota_cloud_state_serializer.hpp"
+#include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/ota/state/state_proto.hpp"
+#include "ccu/fota/store/fota_cloud_state_serializer.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <sstream>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
-using namespace cgw_fota::store::fota;
+using namespace ccu_fota::store::fota;
 
 namespace {
 std::int64_t nowMs() {
@@ -44,7 +44,7 @@ CallContext FotaOrchestrator::makeCtx(const std::string& idempotencyKey) const {
     return ctx;
 }
 
-std::int64_t FotaOrchestrator::nowMs() const { return ::cgw_fota::ota::nowMs(); }
+std::int64_t FotaOrchestrator::nowMs() const { return ::ccu_fota::ota::nowMs(); }
 
 // ---------------------------------------------------------------------------
 // 持久化辅助
@@ -652,7 +652,7 @@ StepOutcome FotaOrchestrator::doLogUpload() {
     ::vehicle::fota::v1::LogGrantRequest lreq;
     std::string logId = "LOG-" + std::to_string(nowMs());
     lreq.set_log_request_id(logId);
-    lreq.add_collection_scope("cgw-fota");
+    lreq.add_collection_scope("ccu-fota");
     lreq.mutable_log_time_range()->set_start_at_ms(0);
     lreq.mutable_log_time_range()->set_end_at_ms(nowMs());
     lreq.set_redaction_profile_version("v1");
@@ -793,4 +793,4 @@ bool FotaOrchestrator::syncPolicy() {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

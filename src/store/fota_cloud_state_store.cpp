@@ -1,17 +1,17 @@
 // =============================================================================
 // src/store/fota_cloud_state_store.cpp
-// CGW-FOTA 车云 FOTA 状态存储封装实现 (CGW-FOTA-DSN-CR-011 §Store)
+// CCU-FOTA 车云 FOTA 状态存储封装实现 (CCU-FOTA-DSN-CR-011 §Store)
 // =============================================================================
 
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
 
 #include <utility>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 namespace fota {
 
-FotaCloudStateStore::FotaCloudStateStore(cgw::fw::store::Store store)
+FotaCloudStateStore::FotaCloudStateStore(ccu::fw::store::Store store)
     : store_(std::move(store)) {}
 
 // ---- fota.vehicle_task ----
@@ -137,4 +137,4 @@ void FotaCloudStateStore::removeLogJob(const std::string& logRequestId) {
 
 } // namespace fota
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

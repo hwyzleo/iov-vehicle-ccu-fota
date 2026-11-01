@@ -1,21 +1,21 @@
 // =============================================================================
 // src/fingerprint/inventory_fingerprint.cpp
-// CGW-FOTA 业务摘要实现 (CGW-FOTA-DSN-CR-006 §10.1/10.3/10.4/10.5)
+// CCU-FOTA 业务摘要实现 (CCU-FOTA-DSN-CR-006 §10.1/10.3/10.4/10.5)
 // =============================================================================
 
-#include "cgw/fota/fingerprint/inventory_fingerprint.hpp"
-#include "cgw/fota/fingerprint/canonical_encoder.hpp"
+#include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
+#include "ccu/fota/fingerprint/canonical_encoder.hpp"
 
-#include <cgw/fw/hash/sha256.hpp>
+#include <ccu/fw/hash/sha256.hpp>
 
 #include <algorithm>
 #include <tuple>
 #include <vector>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace fingerprint {
 
-using cgw::fw::hash::ByteView;
+using ccu::fw::hash::ByteView;
 
 namespace {
 
@@ -116,7 +116,7 @@ std::vector<std::size_t> sortEcuIndices(const std::vector<EcuVersionEntry>& ecus
             ecus[order[i]].part_number.value_or(""),
             ecus[order[i]].sw_version.value_or(""));
         if (ka == kb) {
-            throw CanonicalError("CGW-FOTA-2001",
+            throw CanonicalError("CCU-FOTA-2001",
                                  "duplicate ECU stable key: ecuId=" +
                                      ecus[order[i]].ecu_id);
         }
@@ -148,15 +148,15 @@ std::vector<std::uint8_t> encodeSnapshotEcu(const EcuVersionEntry& e) {
 }
 
 // 计算 framework SHA-256 并构造 Fingerprint（调用 sha256 + sha256_hex）。
-// 任一失败抛 cgw::fw::hash::HashException(CGW-FW-0401/0402)，fail-closed。
+// 任一失败抛 ccu::fw::hash::HashException(CCU-FW-0401/0402)，fail-closed。
 Fingerprint makeFingerprint(std::string_view canonicalization,
                             const std::vector<std::uint8_t>& bytes) {
     ByteView view{bytes.data(), bytes.size()};
     Fingerprint fp;
     fp.algorithm = "sha-256";
     fp.canonicalization = std::string(canonicalization);
-    fp.digest = cgw::fw::hash::sha256(view);
-    fp.hexStr = cgw::fw::hash::sha256_hex(view);
+    fp.digest = ccu::fw::hash::sha256(view);
+    fp.hexStr = ccu::fw::hash::sha256_hex(view);
     return fp;
 }
 
@@ -220,7 +220,7 @@ std::string buildDedupeKey(const Fingerprint& snapshotFingerprint,
     enc.writeBytesField(0x0003, snapshotFingerprint.digest.data(),
                         snapshotFingerprint.digest.size());
     std::vector<std::uint8_t> bytes = enc.finalize();
-    return cgw::fw::hash::sha256_hex(ByteView{bytes.data(), bytes.size()});
+    return ccu::fw::hash::sha256_hex(ByteView{bytes.data(), bytes.size()});
 }
 
 // ===========================================================================
@@ -232,8 +232,8 @@ std::string buildIdentifierDigest(IdentifierKind kind,
     CanonicalEncoder enc(domain);
     enc.writeStringField(0x0001, normalizedValue);
     std::vector<std::uint8_t> bytes = enc.finalize();
-    return cgw::fw::hash::sha256_hex(ByteView{bytes.data(), bytes.size()});
+    return ccu::fw::hash::sha256_hex(ByteView{bytes.data(), bytes.size()});
 }
 
 } // namespace fingerprint
-} // namespace cgw_fota
+} // namespace ccu_fota

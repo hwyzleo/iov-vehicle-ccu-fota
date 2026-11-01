@@ -1,13 +1,13 @@
 // =============================================================================
 // tests/test_store_integration.cpp
-// CGW-FOTA 状态持久化集成测试 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态持久化集成测试 (CCU-FOTA-DSN-CR-005)
 // 覆盖：崩溃恢复（各检查点）、对账、序号继续、安全。
 // 说明：InventoryReporter 驱动的“上报周期写 store”集成用例随死代码清理移除
 // （InventoryReporter 已删除），此处仅保留直接基于 store/StateRecovery 的用例。
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_store.hpp"
-#include "cgw/fota/store/fota_state_recovery.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_recovery.hpp"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -15,8 +15,8 @@
 #include <filesystem>
 
 namespace fs = std::filesystem;
-using namespace cgw_fota;
-using namespace cgw_fota::store;
+using namespace ccu_fota;
+using namespace ccu_fota::store;
 
 namespace {
 fs::path makeUniqueRoot() {

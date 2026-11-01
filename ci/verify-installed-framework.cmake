@@ -1,7 +1,7 @@
-# ci/verify-installed-framework.cmake - CGW-FOTA-DSN-CR-008 §12.2/§12.7
+# ci/verify-installed-framework.cmake - CCU-FOTA-DSN-CR-008 §12.2/§12.7
 #
-# Verify the installed CGW Framework SDK package is relocatable and consumable
-# from an isolated staging prefix: find_package(CGWFramework CONFIG REQUIRED)
+# Verify the installed CCU Framework SDK package is relocatable and consumable
+# from an isolated staging prefix: find_package(CCUFramework CONFIG REQUIRED)
 # resolves and all five exported targets link into a trivial HOST consumer.
 #
 # HOST consumer success does NOT replace TARGET architecture/ABI/link
@@ -29,27 +29,27 @@ file(MAKE_DIRECTORY "${_consumer_dir}")
 file(WRITE "${_consumer_dir}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(fw_consumer LANGUAGES CXX)
-find_package(CGWFramework CONFIG REQUIRED)
+find_package(CCUFramework CONFIG REQUIRED)
 add_executable(fw_consumer main.cpp)
 target_compile_features(fw_consumer PRIVATE cxx_std_20)
 target_link_libraries(fw_consumer PRIVATE
-    CGWFramework::cgw-framework-config
-    CGWFramework::cgw-framework-log
-    CGWFramework::cgw-framework-store
-    CGWFramework::cgw-framework-hash
-    CGWFramework::cgw-framework-someip)
+    CCUFramework::ccu-framework-config
+    CCUFramework::ccu-framework-log
+    CCUFramework::ccu-framework-store
+    CCUFramework::ccu-framework-hash
+    CCUFramework::ccu-framework-someip)
 ]=])
 
 # A consumer that only touches exported API surface (headers + symbols) enough
 # to prove the imported targets resolve and link. Keep it minimal and portable.
-# Header layout follows the CGW-FW installed export (flat config.h/log.h/
-# store.h + cgw/fw/hash|someip/*.hpp).
+# Header layout follows the CCU-FW installed export (flat config.h/log.h/
+# store.h + ccu/fw/hash|someip/*.hpp).
 file(WRITE "${_consumer_dir}/main.cpp" [==[
 #include "config.h"
 #include "log.h"
 #include "store.h"
-#include "cgw/fw/hash/sha256.hpp"
-#include "cgw/fw/someip/runtime.hpp"
+#include "ccu/fw/hash/sha256.hpp"
+#include "ccu/fw/someip/runtime.hpp"
 int main() { return 0; }
 ]==])
 
@@ -58,7 +58,7 @@ message(STATUS "[verify-installed-framework] SDK_PREFIX=${SDK_PREFIX}")
 execute_process(
     COMMAND ${CMAKE_COMMAND}
             -DCMAKE_PREFIX_PATH=${SDK_PREFIX}
-            -DCGWFramework_DIR=${SDK_PREFIX}/lib/cmake/CGWFramework
+            -DCCUFramework_DIR=${SDK_PREFIX}/lib/cmake/CCUFramework
             -S "${_consumer_dir}" -B "${_consumer_dir}/build"
     RESULT_VARIABLE _cfg)
 if(NOT _cfg EQUAL 0)

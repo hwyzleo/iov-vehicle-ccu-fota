@@ -1,13 +1,13 @@
 // =============================================================================
 // src/store/fota_state_migration.cpp
-// CGW-FOTA 旧 ota.* 状态迁移器实现 (CGW-FOTA-DSN-CR-011 §Store 迁移流程)
+// CCU-FOTA 旧 ota.* 状态迁移器实现 (CCU-FOTA-DSN-CR-011 §Store 迁移流程)
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_migration.hpp"
+#include "ccu/fota/store/fota_state_migration.hpp"
 
-#include "cgw/fota/store/fota_cloud_state.hpp"
-#include "cgw/fota/store/fota_cloud_state_serializer.hpp"
-#include "cgw/fota/store/fota_state_serializer.hpp"  // FTSE envelope 复用
+#include "ccu/fota/store/fota_cloud_state.hpp"
+#include "ccu/fota/store/fota_cloud_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"  // FTSE envelope 复用
 
 #include <nlohmann/json.hpp>
 
@@ -22,23 +22,23 @@
 #include <string_view>
 #include <vector>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 
 namespace {
 
 using json = nlohmann::json;
-using cgw_fota::store::fota::FotaConsentRecord;
-using cgw_fota::store::fota::FotaControlRecord;
-using cgw_fota::store::fota::FotaDownloadRecord;
-using cgw_fota::store::fota::FotaEventOutboxMeta;
-using cgw_fota::store::fota::FotaEventOutboxRecord;
-using cgw_fota::store::fota::FotaExecutionRecord;
-using cgw_fota::store::fota::FotaInventoryRecord;
-using cgw_fota::store::fota::FotaLogJobRecord;
-using cgw_fota::store::fota::FotaPolicyRecord;
-using cgw_fota::store::fota::FotaVehicleTaskRecord;
-using cgw_fota::store::fota::Timestamp;
+using ccu_fota::store::fota::FotaConsentRecord;
+using ccu_fota::store::fota::FotaControlRecord;
+using ccu_fota::store::fota::FotaDownloadRecord;
+using ccu_fota::store::fota::FotaEventOutboxMeta;
+using ccu_fota::store::fota::FotaEventOutboxRecord;
+using ccu_fota::store::fota::FotaExecutionRecord;
+using ccu_fota::store::fota::FotaInventoryRecord;
+using ccu_fota::store::fota::FotaLogJobRecord;
+using ccu_fota::store::fota::FotaPolicyRecord;
+using ccu_fota::store::fota::FotaVehicleTaskRecord;
+using ccu_fota::store::fota::Timestamp;
 
 // ============================================================
 // 旧 key 清单（vehicle.ota.v1 时代）
@@ -409,8 +409,8 @@ std::string mapApplyMode(const std::string& old) {
 // ===========================================================================
 // migrateOtaToFota
 // ===========================================================================
-FotaMigrationResult migrateOtaToFota(cgw::fw::store::Store& store) {
-    using cgw::fw::store::Store;
+FotaMigrationResult migrateOtaToFota(ccu::fw::store::Store& store) {
+    using ccu::fw::store::Store;
     FotaMigrationResult out;
 
     const std::vector<std::string> oldKeys = {
@@ -643,4 +643,4 @@ FotaMigrationResult migrateOtaToFota(cgw::fw::store::Store& store) {
 }
 
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

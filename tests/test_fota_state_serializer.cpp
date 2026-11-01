@@ -1,11 +1,11 @@
 // =============================================================================
 // tests/test_fota_state_serializer.cpp
-// CGW-FOTA 状态序列化器单元测试 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态序列化器单元测试 (CCU-FOTA-DSN-CR-005)
 // 覆盖：envelope 往返、v0->v1 迁移、重复迁移、未知新版本 fail-closed、
 //       损坏（截断/错 magic/错长度/非法枚举/超大值）。
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -13,8 +13,8 @@
 #include <cstring>
 #include <string>
 
-using namespace cgw_fota;
-using namespace cgw_fota::store;
+using namespace ccu_fota;
+using namespace ccu_fota::store;
 using json = nlohmann::json;
 
 namespace {
@@ -254,7 +254,7 @@ TEST(FotaStateSerializerTest, ActiveJobRoundTrip) {
     s.phase = JobPhase::SubmitPrepared;
     s.attempt = 2;
     s.nextRetryAt = 1700000000000;
-    s.lastErrorCode = "CGW-FOTA-1004";
+    s.lastErrorCode = "CCU-FOTA-1004";
     s.idempotencyKey = "idem-abc";
     std::string env = encodeActiveJob(s);
     ActiveJobState d = decodeActiveJob(env);
@@ -265,7 +265,7 @@ TEST(FotaStateSerializerTest, ActiveJobRoundTrip) {
     EXPECT_EQ(d.phase, JobPhase::SubmitPrepared);
     EXPECT_EQ(d.attempt, 2u);
     EXPECT_EQ(d.nextRetryAt, 1700000000000);
-    EXPECT_EQ(d.lastErrorCode, "CGW-FOTA-1004");
+    EXPECT_EQ(d.lastErrorCode, "CCU-FOTA-1004");
     EXPECT_EQ(d.idempotencyKey, "idem-abc");
 }
 

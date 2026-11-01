@@ -1,12 +1,12 @@
 # =============================================================================
-# config/fota.default.yaml - CGW-FOTA 安全默认模板 (CGW-FOTA-DSN-CR-004)
+# config/fota.default.yaml - CCU-FOTA 安全默认模板 (CCU-FOTA-DSN-CR-004)
 # =============================================================================
-# 由 CGW-FOTA 仓库维护并随源码版本化。不含任何秘密、设备实例值、VIN、device_sn、
+# 由 CCU-FOTA 仓库维护并随源码版本化。不含任何秘密、设备实例值、VIN、device_sn、
 # token、密钥或证书私钥；不含 Service/Instance/Method ID、传输协议或端口（寻址
 # SSOT 为整车 SOME/IP Service Registry）。可独立通过 config/schema/fota.schema.yaml
 # 校验并完成最小启动。
 #
-# CGW-BUILD 将本模板精确安装为 staging /etc/cgw/conf.d/fota.yaml，再用平台发布
+# CCU-BUILD 将本模板精确安装为 staging /etc/ccu/conf.d/fota.yaml，再用平台发布
 # 配置在同路径执行授权覆盖；不得通配安装整个 config/。
 # =============================================================================
 fota:
@@ -14,13 +14,13 @@ fota:
     change_detection_enabled: true    # 是否启用变更检测
     min_report_interval_ms: 300000    # 自动上报最小间隔（节流），非负
     max_pending_requests: 32          # 等待队列上限 1..1024（同一时刻仍最多一轮采集）
-    dedupe_max_entries: 100           # 去重窗口条目上限 1..1024 (CGW-FOTA-DSN-CR-005)
+    dedupe_max_entries: 100           # 去重窗口条目上限 1..1024 (CCU-FOTA-DSN-CR-005)
     dedupe_ttl_ms: 3600000            # 去重窗口保留期（ms），0 表示无 TTL
   diag:
     collect_timeout_ms: 30000         # DIAG 采集超时，正整数
     retry_max_attempts: 2             # 采集重试次数 0..10
     retry_backoff_ms: 1000            # 采集重试退避，非负
-  someip:                            # CGW-FOTA-DSN-CR-007 SOME/IP 框架接入（CR-010/011 契约 B）
+  someip:                            # CCU-FOTA-DSN-CR-007 SOME/IP 框架接入（CR-010/011 契约 B）
     transport:                       # 契约 B SOME/IP 通用传输有界配置 (CR-010/011)
       exchange_timeout_ms: 10000      # 单次 exchange/publish 本地超时上限
       max_envelope_bytes: 262144      # 序列化 Envelope 大小上限
@@ -40,7 +40,7 @@ fota:
       event_id: 32770         # 0x8002 EVENT_VEHICLE_MESSAGE（下行 RESPONSE/EVENT）
       eventgroup_id: 2        # 0x0002 EVENTGROUP_VEHICLE_MESSAGE
       interface_major: 1      # TBOX-SOMEIP 接口 major 版本
-  cloud:                             # CGW-FOTA-DSN-CR-009 车云 FOTA 编排（CR-011 由 ota 收敛）
+  cloud:                             # CCU-FOTA-DSN-CR-009 车云 FOTA 编排（CR-011 由 ota 收敛）
     enabled: true                     # 量产部署需先由 Registry 分配 generic transport ID
                                       # （fota.someip.generic_transport.*），否则契约 B fail-closed
     protocol_version: fota-v1
@@ -50,8 +50,8 @@ fota:
     event_batch_max: 64               # 单批事件上报上限 1..65535
     control_ack_timeout_ms: 5000      # 控制回执超时，正整数
     cloud_call_timeout_ms: 10000      # 车云调用默认超时，正整数
-  mock:                              # CGW-FOTA-DSN-CR-009 测试桩
+  mock:                              # CCU-FOTA-DSN-CR-009 测试桩
     enabled: false                    # 量产必须 false
     scenario_path: ""                 # Mock 场景脚本路径
     virtual_clock: false              # 是否使用虚拟时钟
-  log: {}                             # 服务级日志覆盖，字段由 cgw-framework-log schema 片段约束
+  log: {}                             # 服务级日志覆盖，字段由 ccu-framework-log schema 片段约束

@@ -1,15 +1,15 @@
 // =============================================================================
 // tests/ota/fota_state_migration_test.cpp
-// CGW-FOTA 旧 ota.* -> fota.* 状态迁移测试 (CGW-FOTA-DSN-CR-011 §Store 迁移流程 / 测试矩阵 4)
+// CCU-FOTA 旧 ota.* -> fota.* 状态迁移测试 (CCU-FOTA-DSN-CR-011 §Store 迁移流程 / 测试矩阵 4)
 // 覆盖：完整迁移、字段保留（revision/offset/sequence/摘要/时间）、重复迁移幂等、
 // 断电恢复（marker 中断重试）、未知新格式/损坏 fail-closed、完成后遗留清理。
 // =============================================================================
 
-#include "cgw/fota/store/fota_cloud_state.hpp"
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
-#include "cgw/fota/store/fota_state_migration.hpp"
-#include "cgw/fota/store/fota_state_serializer.hpp"
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_cloud_state.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_state_migration.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -20,9 +20,9 @@
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
-using namespace cgw_fota::store;
-using namespace cgw_fota::store::fota;
-using cgw::fw::store::Store;
+using namespace ccu_fota::store;
+using namespace ccu_fota::store::fota;
+using ccu::fw::store::Store;
 
 namespace {
 
@@ -43,9 +43,9 @@ void saveLegacy(Store& store, const std::string& key, const json& j) {
 
 // 打开（无 fota 迁移触发，测试显式调用 migrateOtaToFota）。
 Store openStore(const fs::path& root) {
-    cgw::fw::store::StoreOptions opts;
+    ccu::fw::store::StoreOptions opts;
     opts.root = root;
-    opts.flushMode = cgw::fw::store::FlushMode::Synchronous;
+    opts.flushMode = ccu::fw::store::FlushMode::Synchronous;
     return Store::open("fota", opts);
 }
 

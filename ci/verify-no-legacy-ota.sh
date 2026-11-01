@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# ci/verify-no-legacy-ota.sh - CGW-FOTA-DSN-CR-011 制品扫描（测试矩阵 7）
+# ci/verify-no-legacy-ota.sh - CCU-FOTA-DSN-CR-011 制品扫描（测试矩阵 7）
 #
 # 一次性 release-set 迁移后，除迁移模块及其测试外，任何源码、配置、测试、proto、
 # 构建脚本和制品中不得残留未批准的旧 FOTA 契约：
@@ -31,7 +31,7 @@ MATCHES="$(
       . 2>/dev/null \
   | grep -vE '^\./(build|graphify-out|\.git)/' \
   | grep -vE 'ci/verify-no-legacy-ota\.sh' \
-  | grep -vE 'src/store/fota_state_migration\.cpp|include/cgw/fota/store/fota_state_migration\.hpp|tests/ota/fota_state_migration_test\.cpp'
+  | grep -vE 'src/store/fota_state_migration\.cpp|include/ccu/fota/store/fota_state_migration\.hpp|tests/ota/fota_state_migration_test\.cpp'
 )"
 
 if [ -n "$MATCHES" ]; then

@@ -1,6 +1,6 @@
 // =============================================================================
 // tests/ota/transport_contract_test.cpp
-// CGW-FOTA 通用传输端口 contract tests (CGW-FOTA-DSN-CR-010 / CR-011 测试矩阵)
+// CCU-FOTA 通用传输端口 contract tests (CCU-FOTA-DSN-CR-010 / CR-011 测试矩阵)
 // =============================================================================
 // 覆盖 CR-011 测试矩阵：
 //   1) 每个 FotaCloudProxy 方法：encode/exchange/decode contract test（vehicle.fota.v1）。
@@ -12,11 +12,11 @@
 //   10) 下行订阅与解码、publish 单向投递。
 // =============================================================================
 
-#include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
-#include "cgw/fota/ota/fota_cloud_proxy_via_transport.hpp"
-#include "cgw/fota/ota/fota_message_codec.hpp"
-#include "cgw/fota/ota/payload_types.hpp"
-#include "cgw/fota/ota/vehicle_message_transport.hpp"
+#include "ccu/fota/ota/mock/fake_vehicle_message_transport.hpp"
+#include "ccu/fota/ota/fota_cloud_proxy_via_transport.hpp"
+#include "ccu/fota/ota/fota_message_codec.hpp"
+#include "ccu/fota/ota/payload_types.hpp"
+#include "ccu/fota/ota/vehicle_message_transport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -26,8 +26,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace cgw_fota::ota;
-using namespace cgw_fota::ota::mock;
+using namespace ccu_fota::ota;
+using namespace ccu_fota::ota::mock;
 
 namespace {
 
@@ -226,7 +226,7 @@ TEST(TransportContract, AllProxyMethodsRoundTrip) {
     {
         ::vehicle::fota::v1::LogGrantRequest req;
         req.set_log_request_id("LOG-1");
-        req.add_collection_scope("cgw-fota");
+        req.add_collection_scope("ccu-fota");
         req.mutable_log_time_range()->set_start_at_ms(0);
         req.mutable_log_time_range()->set_end_at_ms(nowMs());
         req.set_redaction_profile_version("v1");
@@ -455,7 +455,7 @@ TEST(TransportContract, TimeoutOutcomeMappedToFotaCloudException) {
         FAIL() << "should throw";
     } catch (const FotaCloudException& e) {
         EXPECT_EQ(e.kind(), FotaCloudException::Kind::Timeout);
-        EXPECT_EQ(e.frameworkCauseCode(), "CGW-FW-0305");
+        EXPECT_EQ(e.frameworkCauseCode(), "CCU-FW-0305");
     }
     auto resp = cloud.checkTask(req, makeCtx("ct-timeout"));
     ASSERT_TRUE(resp.has_task());

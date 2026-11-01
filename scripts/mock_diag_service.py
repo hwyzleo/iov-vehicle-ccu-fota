@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mock DIAG Service for testing CGW-FOTA.
+Mock DIAG Service for testing CCU-FOTA.
 Listens on port 30501 and responds to SOME/IP requests with mock data.
 """
 
@@ -22,11 +22,11 @@ import time
 SOMEIP_HEADER_FORMAT = '>HHI H H B B B B'
 SOMEIP_HEADER_SIZE = struct.calcsize(SOMEIP_HEADER_FORMAT)
 
-# Service IDs (aligned with iov-vehicle-cgw-diag project)
+# Service IDs (aligned with iov-vehicle-ccu-diag project)
 DIAG_SERVICE_ID = 0x7725
 DIAG_INSTANCE_ID = 0x0001
 
-# Method IDs (aligned with CGW-DIAG-DSN-CR-006)
+# Method IDs (aligned with CCU-DIAG-DSN-CR-006)
 METHOD_READ_VIN = 0x0001
 METHOD_COLLECT_VEHICLE_INVENTORY = 0x0002
 METHOD_GET_ECU_VERSION = 0x0003

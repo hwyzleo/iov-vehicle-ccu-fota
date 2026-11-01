@@ -1,7 +1,7 @@
 #include "data_models.h"
 #include <gtest/gtest.h>
 
-using namespace cgw_fota;
+using namespace ccu_fota;
 
 TEST(DataModelsTest, EcuVersionEntryCreation) {
     EcuVersionEntry entry;

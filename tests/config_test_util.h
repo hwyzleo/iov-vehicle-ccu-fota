@@ -1,9 +1,9 @@
 #pragma once
 
 // =============================================================================
-// tests/config_test_util.h - CGW-FOTA 配置测试夹具 (CGW-FOTA-DSN-CR-004)
+// tests/config_test_util.h - CCU-FOTA 配置测试夹具 (CCU-FOTA-DSN-CR-004)
 // =============================================================================
-// RAII 临时目录，用于构造 cgw-framework-config 六阶段解析所需的 configRoots
+// RAII 临时目录，用于构造 ccu-framework-config 六阶段解析所需的 configRoots
 // 与 conf.d/<svc>.yaml 场景，镜像框架 config_test_util.h 的模式（该头为框架私有，
 // 未随安装包发布，故 FOTA 自带一份）。
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <cstdlib>
 
-namespace cgw_fota_test {
+namespace ccu_fota_test {
 
 namespace fs = std::filesystem;
 
@@ -21,7 +21,7 @@ struct TempDir {
 
     TempDir() {
         auto base = fs::temp_directory_path();
-        std::string name = "cgw-fota-cfg-";
+        std::string name = "ccu-fota-cfg-";
         for (int i = 0; i < 8; ++i) name.push_back('a' + (std::rand() % 26));
         path = base / name;
         fs::create_directories(path);
@@ -74,4 +74,4 @@ struct TempDir {
     }
 };
 
-} // namespace cgw_fota_test
+} // namespace ccu_fota_test

@@ -1,11 +1,11 @@
 // =============================================================================
 // tests/test_fota_state_recovery.cpp
-// CGW-FOTA 状态恢复器单元测试 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态恢复器单元测试 (CCU-FOTA-DSN-CR-005)
 // 覆盖恢复矩阵：无 job / 各 phase / CompletedPendingCleanup 对账 /
 //               active_job 损坏 / sequence 阻断与回退。
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_recovery.hpp"
+#include "ccu/fota/store/fota_state_recovery.hpp"
 
 #include <gtest/gtest.h>
 
@@ -13,8 +13,8 @@
 #include <fstream>
 
 namespace fs = std::filesystem;
-using namespace cgw_fota;
-using namespace cgw_fota::store;
+using namespace ccu_fota;
+using namespace ccu_fota::store;
 
 namespace {
 fs::path makeUniqueRoot() {
@@ -286,10 +286,10 @@ TEST(FotaStateRecoveryTest, SequenceRollbackDetected) {
     }
     // 篡改 sequence 为旧值（highestAllocated=1 < last_success.seq=2）
     {
-        cgw::fw::store::StoreOptions opts;
+        ccu::fw::store::StoreOptions opts;
         opts.root = root;
-        opts.flushMode = cgw::fw::store::FlushMode::Synchronous;
-        auto inner = cgw::fw::store::Store::open("fota", opts);
+        opts.flushMode = ccu::fw::store::FlushMode::Synchronous;
+        auto inner = ccu::fw::store::Store::open("fota", opts);
         SequenceState s;
         s.highestAllocated = 1;  // 回退
         inner.save<std::string>(keys::SEQUENCE, encodeSequence(s));

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# iov-vehicle-cgw-fota 构建脚本
+# iov-vehicle-ccu-fota 构建脚本
 #
 # 用法: ./scripts/build.sh [选项]
 #
@@ -26,7 +26,7 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 # 默认选项
 CLEAN_BUILD=false
 RUN_TESTS=true
-# CGW-FOTA-DSN-CR-008: 正式 install/部署由 CGW-BUILD release-set 完成，
+# CCU-FOTA-DSN-CR-008: 正式 install/部署由 CCU-BUILD release-set 完成，
 # 开发脚本不再提供 --install/sudo make install 旁路。
 
 # 显示帮助信息
@@ -185,12 +185,12 @@ configure_project() {
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
-    # CGW-FOTA-DSN-CR-004: 依赖 cgw-framework 组件静态库（config/log）。
-    # 默认从 $HOME/.local 解析；可用 CGW_FRAMEWORK_PREFIX 覆盖。
-    local fw_prefix="${CGW_FRAMEWORK_PREFIX:-$HOME/.local}"
+    # CCU-FOTA-DSN-CR-004: 依赖 ccu-framework 组件静态库（config/log）。
+    # 默认从 $HOME/.local 解析；可用 CCU_FRAMEWORK_PREFIX 覆盖。
+    local fw_prefix="${CCU_FRAMEWORK_PREFIX:-$HOME/.local}"
     cmake .. -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_PREFIX_PATH="${fw_prefix}" \
-        -DCGWFramework_DIR="${fw_prefix}/lib/cmake/CGWFramework"
+        -DCCUFramework_DIR="${fw_prefix}/lib/cmake/CCUFramework"
 
     if [ $? -ne 0 ]; then
         print_error "CMake 配置失败"
@@ -248,9 +248,9 @@ run_tests() {
 }
 
 # 安装项目
-# CGW-FOTA-DSN-CR-008: 部署由 CGW-BUILD release-set 编排，开发脚本不提供
+# CCU-FOTA-DSN-CR-008: 部署由 CCU-BUILD release-set 编排，开发脚本不提供
 # 系统安装旁路。如需本地 DESTDIR staging 验证：
-#   cmake --install build --prefix /usr --component cgw-fota-runtime
+#   cmake --install build --prefix /usr --component ccu-fota-runtime
 #   ( DESTDIR=/tmp/fota-root cmake --install build --prefix /usr ... )
 
 # 显示构建摘要
@@ -263,12 +263,12 @@ show_summary() {
     echo "构建目录:   ${BUILD_DIR}"
     echo ""
     echo "构建产物:"
-    echo "  - 主程序:      ${BUILD_DIR}/cgw-fota"
-    echo "  - 测试程序:    ${BUILD_DIR}/CgwFotaTests"
+    echo "  - 主程序:      ${BUILD_DIR}/ccu-fota"
+    echo "  - 测试程序:    ${BUILD_DIR}/CcuFotaTests"
     echo ""
     echo "使用方法:"
-    echo "  ${BUILD_DIR}/cgw-fota --help"
-    echo "  ${BUILD_DIR}/CgwFotaTests"
+    echo "  ${BUILD_DIR}/ccu-fota --help"
+    echo "  ${BUILD_DIR}/CcuFotaTests"
     echo "=========================================="
 }
 
@@ -300,7 +300,7 @@ parse_args() {
 # 主函数
 main() {
     echo "=========================================="
-    echo "iov-vehicle-cgw-fota 构建脚本"
+    echo "iov-vehicle-ccu-fota 构建脚本"
     echo "=========================================="
     echo ""
 
@@ -319,7 +319,7 @@ main() {
         fi
     fi
 
-    # CGW-FOTA-DSN-CR-006: 私有 SHA-256 守卫（编译前扫描源码/依赖图/链接配置）
+    # CCU-FOTA-DSN-CR-006: 私有 SHA-256 守卫（编译前扫描源码/依赖图/链接配置）
     if ! bash "${PROJECT_ROOT}/scripts/check_no_private_sha256.sh"; then
         print_error "私有 SHA-256 守卫检查失败"
         exit 1

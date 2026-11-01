@@ -1,9 +1,9 @@
 // =============================================================================
 // src/ota/mock/scenario_script.cpp
-// CGW-FOTA Mock 场景脚本加载实现 (CGW-FOTA-DSN-CR-009)
+// CCU-FOTA Mock 场景脚本加载实现 (CCU-FOTA-DSN-CR-009)
 // =============================================================================
 
-#include "cgw/fota/ota/mock/scenario_script.hpp"
+#include "ccu/fota/ota/mock/scenario_script.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -11,7 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 namespace mock {
 
@@ -81,4 +81,4 @@ ScenarioScript loadScenario(const std::string& path) {
 
 } // namespace mock
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

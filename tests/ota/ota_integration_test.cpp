@@ -1,18 +1,18 @@
 // =============================================================================
 // tests/ota/ota_integration_test.cpp
-// CGW-FOTA 车云 FOTA 编排集成测试 (CGW-FOTA-DSN-CR-009 §验收 / CR-010 迁移 / CR-011)
+// CCU-FOTA 车云 FOTA 编排集成测试 (CCU-FOTA-DSN-CR-009 §验收 / CR-010 迁移 / CR-011)
 // fake TBOX/cloud server = FakeVehicleMessageTransport（通用传输端口）；
 // FotaCloudProxyViaTransport 在端口之上实现强类型 FotaCloudProxy；Mock 端口驱动车内副作用。
 // 覆盖：Happy Path 九阶段、下载/许可/事件/云超时故障恢复、断电恢复、授权拒绝、策略、控制去重。
 // =============================================================================
 
-#include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
-#include "cgw/fota/ota/mock/mock_ports.hpp"
-#include "cgw/fota/ota/fota_cloud_proxy_via_transport.hpp"
-#include "cgw/fota/ota/fota_orchestrator.hpp"
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
-#include "cgw/fota/store/fota_state_migration.hpp"
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/ota/mock/fake_vehicle_message_transport.hpp"
+#include "ccu/fota/ota/mock/mock_ports.hpp"
+#include "ccu/fota/ota/fota_cloud_proxy_via_transport.hpp"
+#include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_state_migration.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 
 #include <gtest/gtest.h>
 
@@ -21,10 +21,10 @@
 #include <sstream>
 
 namespace fs = std::filesystem;
-using namespace cgw_fota::ota;
-using namespace cgw_fota::ota::mock;
-using namespace cgw_fota::store;
-using namespace cgw_fota::store::fota;
+using namespace ccu_fota::ota;
+using namespace ccu_fota::ota::mock;
+using namespace ccu_fota::store;
+using namespace ccu_fota::store::fota;
 
 namespace {
 

@@ -1,6 +1,6 @@
 // =============================================================================
 // tests/ota/someip_transport_contract_test.cpp
-// CGW-FOTA 量产 SomeIpVehicleMessageTransport 契约测试 (CR-010/011 测试矩阵 8)
+// CCU-FOTA 量产 SomeIpVehicleMessageTransport 契约测试 (CR-010/011 测试矩阵 8)
 // =============================================================================
 // 覆盖：
 //   1) 与 FakeVehicleMessageTransport 运行同一套传输边界 contract suite
@@ -8,17 +8,17 @@
 //   2) SomeIp 特有：correlation 错配、超时、Unavailable、VersionMismatch、
 //      有界 in-flight、慢订阅者/下行队列满、TBOX 重启重连、graceful shutdown、
 //      Stopping、Envelope 大小上限、结果映射单测。
-// 使用 cgw-framework-someip 公开 API（默认 FakeSomeIpBackend）+ 进程内 Provider
+// 使用 ccu-framework-someip 公开 API（默认 FakeSomeIpBackend）+ 进程内 Provider
 // 扮演 TBOX 通用消息中继（只做 Envelope 级校验/回显，不解析业务 payload）。
 // =============================================================================
 
-#include "cgw/fota/ota/someip_vehicle_message_transport.hpp"
-#include "cgw/fota/ota/fota_message_codec.hpp"
-#include "cgw/fota/ota/payload_types.hpp"
-#include "cgw/fota/ota/mock/fake_vehicle_message_transport.hpp"
+#include "ccu/fota/ota/someip_vehicle_message_transport.hpp"
+#include "ccu/fota/ota/fota_message_codec.hpp"
+#include "ccu/fota/ota/payload_types.hpp"
+#include "ccu/fota/ota/mock/fake_vehicle_message_transport.hpp"
 
-#include "cgw/fw/someip/runtime.hpp"
-#include "cgw/fw/someip/types.hpp"
+#include "ccu/fw/someip/runtime.hpp"
+#include "ccu/fw/someip/types.hpp"
 #include "constants.h"
 
 #include <gtest/gtest.h>
@@ -31,9 +31,9 @@
 #include <thread>
 #include <vector>
 
-using namespace cgw_fota;
-using namespace cgw_fota::ota;
-namespace someip_fw = cgw::fw::someip;
+using namespace ccu_fota;
+using namespace ccu_fota::ota;
+namespace someip_fw = ccu::fw::someip;
 
 namespace {
 
@@ -294,7 +294,7 @@ void RunSharedTransportContractSuite(
 // Fake harness
 // ---------------------------------------------------------------------------
 TEST(SomeIpTransportContract, FakeRunsSharedContractSuite) {
-    using namespace cgw_fota::ota::mock;
+    using namespace ccu_fota::ota::mock;
     auto scenario = parseScenario(R"({
       "scenario": "contract",
       "clock": "virtual",
@@ -314,7 +314,7 @@ struct SomeIpHarness {
     EchoProvider echo;
     std::shared_ptr<someip_fw::Executor> exec;
     std::unique_ptr<SomeIpVehicleMessageTransport> transport;
-    cgw_fota::someip::TboxGenericTransportAddress addr;
+    ccu_fota::someip::TboxGenericTransportAddress addr;
     SomeIpTransportConfig cfg;
 
     // enabled 控制 provider 是否 offer（Unavailable 测试用）。
@@ -344,7 +344,7 @@ struct SomeIpHarness {
 
     someip_fw::SomeIpConfig makeTestConfig2() {
         someip_fw::SomeIpConfig c;
-        c.application = "cgw-fota-test-someip";
+        c.application = "ccu-fota-test-someip";
         c.routingMode = someip_fw::RoutingMode::External;
         c.maxPayloadBytes = 1024 * 1024;
         c.maxInflightCalls = 64;
@@ -360,7 +360,7 @@ struct SomeIpHarness {
         c.maxClients = 8;
         c.maxSubscriptionsPerClient = 16;
         c.maxRetryTimers = 64;
-        c.registryProfile = "cgw-fota-test";
+        c.registryProfile = "ccu-fota-test";
         return c;
     }
 };
@@ -457,7 +457,7 @@ TEST(SomeIpTransportContract, VersionMismatchMapsCorrectly) {
     auto rt = someip_fw::SomeIpRuntime::create(
         [] {
             someip_fw::SomeIpConfig c;
-            c.application = "cgw-fota-test-ver";
+            c.application = "ccu-fota-test-ver";
             c.routingMode = someip_fw::RoutingMode::External;
             c.maxPayloadBytes = 1024 * 1024;
             c.maxInflightCalls = 16;
@@ -469,7 +469,7 @@ TEST(SomeIpTransportContract, VersionMismatchMapsCorrectly) {
             c.maxClients = 4;
             c.maxSubscriptionsPerClient = 8;
             c.maxRetryTimers = 16;
-            c.registryProfile = "cgw-fota-test";
+            c.registryProfile = "ccu-fota-test";
             return c;
         }());
     rt.start();
@@ -481,7 +481,7 @@ TEST(SomeIpTransportContract, VersionMismatchMapsCorrectly) {
         });
     provider.offer();
 
-    cgw_fota::someip::TboxGenericTransportAddress addr;
+    ccu_fota::someip::TboxGenericTransportAddress addr;
     addr.service = DEFAULT_TBOX_SERVICE_ID;
     addr.instance = DEFAULT_TBOX_INSTANCE_ID;
     addr.method = kGenericMethod;
@@ -661,13 +661,13 @@ TEST(SomeIpTransportContract, EnvelopeTooLargeRejected) {
 TEST(SomeIpTransportContract, CallResultMapping) {
     using someip_fw::CallResult;
     EXPECT_EQ(mapCallResultToOutcome(CallResult::ok({})), TransportOutcome::Accepted);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0305", "t")), TransportOutcome::Timeout);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0304", "u")), TransportOutcome::Unavailable);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0306", "p")), TransportOutcome::ProtocolError);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0307", "h")), TransportOutcome::Rejected);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0309", "r")), TransportOutcome::Rejected);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0310", "s")), TransportOutcome::Stopping);
-    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CGW-FW-0301", "x")), TransportOutcome::Unavailable);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0305", "t")), TransportOutcome::Timeout);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0304", "u")), TransportOutcome::Unavailable);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0306", "p")), TransportOutcome::ProtocolError);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0307", "h")), TransportOutcome::Rejected);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0309", "r")), TransportOutcome::Rejected);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0310", "s")), TransportOutcome::Stopping);
+    EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("CCU-FW-0301", "x")), TransportOutcome::Unavailable);
     EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("SOMEIP/0x05", "x")), TransportOutcome::Unknown);
     EXPECT_EQ(mapCallResultToOutcome(CallResult::fail("UNKNOWN", "x")), TransportOutcome::Unknown);
 }

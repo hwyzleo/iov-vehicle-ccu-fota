@@ -1,11 +1,11 @@
 // =============================================================================
 // tests/test_fota_state_store.cpp
-// CGW-FOTA 状态存储封装单元测试 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态存储封装单元测试 (CCU-FOTA-DSN-CR-005)
 // 覆盖：首次启动、序号分配与 durability、溢出、损坏处置（各 key）、
 //       迁移、权限（0700/0600）、序号间隙不复用。
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -16,8 +16,8 @@
 #include <string>
 
 namespace fs = std::filesystem;
-using namespace cgw_fota;
-using namespace cgw_fota::store;
+using namespace ccu_fota;
+using namespace ccu_fota::store;
 
 namespace {
 // 每个测试用独立临时根目录。
@@ -328,7 +328,7 @@ TEST(FotaStateStoreTest, UnwritableRootFailsClosed) {
     bool threw = false;
     try {
         FotaStateStore::open(badRoot / "sub", 100, 3600000);
-    } catch (const cgw::fw::store::StoreException&) {
+    } catch (const ccu::fw::store::StoreException&) {
         threw = true;
     } catch (const std::exception&) {
         threw = true;
@@ -345,10 +345,10 @@ TEST(FotaStateStoreTest, MigratesOldSequenceVersionOnOpen) {
     auto root = makeUniqueRoot();
     {
         // 用底层框架 store 直接写入 v0 sequence
-        cgw::fw::store::StoreOptions opts;
+        ccu::fw::store::StoreOptions opts;
         opts.root = root;
-        opts.flushMode = cgw::fw::store::FlushMode::Synchronous;
-        auto inner = cgw::fw::store::Store::open("fota", opts);
+        opts.flushMode = ccu::fw::store::FlushMode::Synchronous;
+        auto inner = ccu::fw::store::Store::open("fota", opts);
         // v0 payload: 无 schemaVersion / updatedAt
         std::string v0Env = encodeEnvelope(0, R"({"highestAllocated":7})");
         inner.save<std::string>(keys::SEQUENCE, v0Env);
@@ -367,10 +367,10 @@ TEST(FotaStateStoreTest, MigratesOldSequenceVersionOnOpen) {
 TEST(FotaStateStoreTest, MigratesOldLastSuccessVersionOnOpen) {
     auto root = makeUniqueRoot();
     {
-        cgw::fw::store::StoreOptions opts;
+        ccu::fw::store::StoreOptions opts;
         opts.root = root;
-        opts.flushMode = cgw::fw::store::FlushMode::Synchronous;
-        auto inner = cgw::fw::store::Store::open("fota", opts);
+        opts.flushMode = ccu::fw::store::FlushMode::Synchronous;
+        auto inner = ccu::fw::store::Store::open("fota", opts);
         nlohmann::json snap = {{"vin", "V"}, {"baseline_source", "UNKNOWN"},
                                {"registry_version", "rv"}, {"collected_at", "t"},
                                {"overall_result", "ALL_OK"}, {"snapshot_seq", 3},

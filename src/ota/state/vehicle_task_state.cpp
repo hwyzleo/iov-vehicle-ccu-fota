@@ -1,13 +1,13 @@
 // =============================================================================
 // src/ota/state/vehicle_task_state.cpp
-// CGW-FOTA VehicleTask 状态机实现 (CGW-FOTA-DSN-CR-009 §13.2)
+// CCU-FOTA VehicleTask 状态机实现 (CCU-FOTA-DSN-CR-009 §13.2)
 // =============================================================================
 
-#include "cgw/fota/ota/state/vehicle_task_state.hpp"
+#include "ccu/fota/ota/state/vehicle_task_state.hpp"
 
 #include <cstring>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 namespace {
@@ -106,4 +106,4 @@ bool vehicleTaskStateFromString(const char* s, VehicleTaskState& out) {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

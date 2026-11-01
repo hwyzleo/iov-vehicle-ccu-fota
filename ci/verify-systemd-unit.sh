@@ -1,7 +1,7 @@
 #!/bin/bash
-# ci/verify-systemd-unit.sh - CGW-FOTA-DSN-CR-008 §12.4
+# ci/verify-systemd-unit.sh - CCU-FOTA-DSN-CR-008 §12.4
 #
-# Verify packaging/systemd/cgw-fota.service against the CR-008 baseline unit
+# Verify packaging/systemd/ccu-fota.service against the CR-008 baseline unit
 # contract: ExecStart, ordering, restart policy, bounded stop timeout, and
 # sandbox hardening. Runs systemd-analyze verify when available; otherwise
 # performs static directive checks.
@@ -11,7 +11,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UNIT="${ROOT}/packaging/systemd/cgw-fota.service"
+UNIT="${ROOT}/packaging/systemd/ccu-fota.service"
 STATUS=0
 
 violation() { echo "[FAIL] $1" >&2; STATUS=1; }
@@ -24,7 +24,7 @@ require_value() {
     grep -qE "^$1=$2" "$UNIT" && ok "$1=$2" || violation "$1 != $2"
 }
 
-require_value "ExecStart" "/usr/bin/cgw-fota"
+require_value "ExecStart" "/usr/bin/ccu-fota"
 require_value "Type" "simple"
 require_value "Restart" "on-failure"
 require_value "TimeoutStopSec" "30s"
@@ -32,16 +32,16 @@ require_value "NoNewPrivileges" "yes"
 require_value "PrivateTmp" "yes"
 require_value "ProtectSystem" "strict"
 require_value "ProtectHome" "yes"
-require_value "ReadWritePaths" "/var/lib/cgw/fota"
+require_value "ReadWritePaths" "/var/lib/ccu/fota"
 require_value "WantedBy" "multi-user.target"
 
-# Ordering: after network and cgw-diag; wants cgw-diag.
-grep -qE '^After=.*cgw-diag\.service' "$UNIT" \
-    && ok "After cgw-diag.service" || violation "missing After=cgw-diag.service"
+# Ordering: after network and ccu-diag; wants ccu-diag.
+grep -qE '^After=.*ccu-diag\.service' "$UNIT" \
+    && ok "After ccu-diag.service" || violation "missing After=ccu-diag.service"
 grep -qE '^After=.*network\.target' "$UNIT" \
     && ok "After network.target" || violation "missing After=network.target"
-grep -qE '^Wants=cgw-diag\.service' "$UNIT" \
-    && ok "Wants cgw-diag.service" || violation "missing Wants=cgw-diag.service"
+grep -qE '^Wants=ccu-diag\.service' "$UNIT" \
+    && ok "Wants ccu-diag.service" || violation "missing Wants=ccu-diag.service"
 
 # Baseline must NOT default to root (CR-008 §12.4: User/Group come from
 # Platform Manifest drop-in, not the baseline unit).

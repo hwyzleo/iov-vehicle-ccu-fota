@@ -1,19 +1,19 @@
 // =============================================================================
 // src/someip/tbox_generic_transport_contract.cpp
-// CGW-FOTA 契约 B TBOX 通用消息服务寻址解析实现 (CGW-FOTA-DSN-CR-010/011)
+// CCU-FOTA 契约 B TBOX 通用消息服务寻址解析实现 (CCU-FOTA-DSN-CR-010/011)
 // =============================================================================
 // 对 fota.someip.generic_transport.*（Registry 分配的运行配置）做 fail-closed
 // 校验：范围、保留值、与本地已分配 ID 冲突、接口版本一致性。未分配时返回 false
 // （契约 B 不启用），绝不猜测 ID、绝不回退 Fake 或旧私有协议。
 // =============================================================================
 
-#include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
+#include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace someip {
 
-using cgw::fw::someip::InterfaceVersion;
-using cgw::fw::someip::ServiceKey;
+using ccu::fw::someip::InterfaceVersion;
+using ccu::fw::someip::ServiceKey;
 
 namespace {
 
@@ -89,4 +89,4 @@ bool resolveTboxGenericTransport(const FotaConfig& cfg,
 }
 
 } // namespace someip
-} // namespace cgw_fota
+} // namespace ccu_fota

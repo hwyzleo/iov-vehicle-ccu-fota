@@ -1,9 +1,9 @@
 #include "snapshot_assembler.h"
-#include "cgw/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fota/someip/diag_inventory_client.hpp"
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-using namespace cgw_fota;
+using namespace ccu_fota;
 using ::testing::_;
 using ::testing::Return;
 using ::testing::Invoke;

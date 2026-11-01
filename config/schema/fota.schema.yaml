@@ -1,23 +1,23 @@
 # =============================================================================
-# config/schema/fota.schema.yaml - CGW-FOTA 配置 Schema (CGW-FOTA-DSN-CR-004)
+# config/schema/fota.schema.yaml - CCU-FOTA 配置 Schema (CCU-FOTA-DSN-CR-004)
 # =============================================================================
-# 版本化、可执行 schema，供 CGW-BUILD 在发布期对最终 /etc/cgw/conf.d/fota.yaml
-# 执行校验。运行时校验由 cgw-framework-config 六阶段解析 + FotaConfig::from() 的
+# 版本化、可执行 schema，供 CCU-BUILD 在发布期对最终 /etc/ccu/conf.d/fota.yaml
+# 执行校验。运行时校验由 ccu-framework-config 六阶段解析 + FotaConfig::from() 的
 # 类型/范围/跨字段检查完成（fail-closed）。common.* 由公共 schema 单独验证，本
 # schema 不复制其字段定义。
 #
 # 约束要点：
 #   - 唯一顶层 fota，拒绝未知顶层键；common 由公共 schema 单独验证。
 #   - inventory / diag / tbox 使用 additionalProperties: false。
-#   - log 由 cgw-framework-log schema 片段约束（受控引用，不在此复制字段定义）。
+#   - log 由 ccu-framework-log schema 片段约束（受控引用，不在此复制字段定义）。
 #   - 约束布尔、整数、范围与必填字段，并为所有默认值提供验证用示例。
 #   - 声明 schema 版本，供 BUILD 在 manifest 中记录 schema 路径、来源 revision 与摘要。
 #   - 不接受 VIN、device_sn、token、密钥、证书私钥或其他设备实例秘密字段。
 # =============================================================================
 schema_version: 1
-schema_name: cgw-fota.fota
+schema_name: ccu-fota.fota
 description: >
-  CGW-FOTA fota.* 配置契约。Service/Instance/Method ID、传输协议与端口不进入本
+  CCU-FOTA fota.* 配置契约。Service/Instance/Method ID、传输协议与端口不进入本
   文件，继续以整车 SOME/IP Service Registry 为唯一 SSOT。
 
 # 顶层仅允许 fota；common 由公共 schema 单独验证，不得在此复制顶层 common:。
@@ -59,7 +59,7 @@ properties:
             minimum: 1
             maximum: 1024
             default: 100
-            description: 去重窗口条目上限 (CGW-FOTA-DSN-CR-005)。
+            description: 去重窗口条目上限 (CCU-FOTA-DSN-CR-005)。
           dedupe_ttl_ms:
             type: integer
             minimum: 0
@@ -87,12 +87,12 @@ properties:
             minimum: 0
             default: 1000
       someip:
-        # CGW-FOTA-DSN-CR-007/010/011 SOME/IP 框架接入（契约 B 有界传输与 Registry 寻址）
+        # CCU-FOTA-DSN-CR-007/010/011 SOME/IP 框架接入（契约 B 有界传输与 Registry 寻址）
         type: object
         additionalProperties: false
         properties:
           transport:
-            # 契约 B SOME/IP 通用传输有界配置 (CGW-FOTA-DSN-CR-010/011)
+            # 契约 B SOME/IP 通用传输有界配置 (CCU-FOTA-DSN-CR-010/011)
             type: object
             additionalProperties: false
             properties:
@@ -171,11 +171,11 @@ properties:
                 default: 1
                 description: TBOX-SOMEIP 接口 major 版本（过渡 SSOT = 1）。
       log:
-        # 服务级日志覆盖；字段由 cgw-framework-log schema 片段约束，本 schema 不复制。
+        # 服务级日志覆盖；字段由 ccu-framework-log schema 片段约束，本 schema 不复制。
         type: object
         additionalProperties: true
       cloud:
-        # CGW-FOTA-DSN-CR-009 车云 FOTA 编排配置（CR-011 由 ota 收敛）
+        # CCU-FOTA-DSN-CR-009 车云 FOTA 编排配置（CR-011 由 ota 收敛）
         type: object
         additionalProperties: false
         properties:
@@ -211,14 +211,14 @@ properties:
             minimum: 1
             default: 10000
       mock:
-        # CGW-FOTA-DSN-CR-009 测试桩配置（NON_PRODUCTION）
+        # CCU-FOTA-DSN-CR-009 测试桩配置（NON_PRODUCTION）
         type: object
         additionalProperties: false
         properties:
           enabled:
             type: boolean
             default: false
-            description: 量产必须 false；CGW-FOTA 运行时在非测试构建拒绝 true。
+            description: 量产必须 false；CCU-FOTA 运行时在非测试构建拒绝 true。
           scenario_path:
             type: string
             default: ""
@@ -227,7 +227,7 @@ properties:
             default: false
 
 # -----------------------------------------------------------------------------
-# 秘密扫描策略：以下字段名在最终发布文件中出现即 fail-closed（CGW-BUILD 执行）。
+# 秘密扫描策略：以下字段名在最终发布文件中出现即 fail-closed（CCU-BUILD 执行）。
 # -----------------------------------------------------------------------------
 forbidden_keys:
   - vin

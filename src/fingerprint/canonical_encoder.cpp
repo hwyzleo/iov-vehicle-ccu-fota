@@ -1,13 +1,13 @@
 // =============================================================================
 // src/fingerprint/canonical_encoder.cpp
-// CGW-FOTA 规范化编码器实现 (CGW-FOTA-DSN-CR-006 §10.2)
+// CCU-FOTA 规范化编码器实现 (CCU-FOTA-DSN-CR-006 §10.2)
 // =============================================================================
 
-#include "cgw/fota/fingerprint/canonical_encoder.hpp"
+#include "ccu/fota/fingerprint/canonical_encoder.hpp"
 
 #include <cstring>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace fingerprint {
 
 CanonicalError::CanonicalError(std::string code, const std::string& message)
@@ -123,4 +123,4 @@ std::vector<std::uint8_t> CanonicalEncoder::finalize() {
 }
 
 } // namespace fingerprint
-} // namespace cgw_fota
+} // namespace ccu_fota

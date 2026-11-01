@@ -3,17 +3,17 @@
 #include "fota_log_context.h"
 #include <regex>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace {
 
 class FotaLogAdapterTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        cgw::fw::log::LogConfig config;
-        config.level = cgw::fw::log::LogLevel::kDebug;
+        ccu::fw::log::LogConfig config;
+        config.level = ccu::fw::log::LogLevel::kDebug;
 
-        auto result = FotaLogAdapter::init("cgw-fota-test", config);
-        ASSERT_EQ(result.error, cgw::fw::log::LogError::kOk);
+        auto result = FotaLogAdapter::init("ccu-fota-test", config);
+        ASSERT_EQ(result.error, ccu::fw::log::LogError::kOk);
     }
 };
 
@@ -58,13 +58,13 @@ TEST_F(FotaLogAdapterTest, FieldTypesWork) {
 }
 
 TEST_F(FotaLogAdapterTest, SensitivityLevelsWork) {
-    // 验证不同敏感度级别的字段（CGW-FOTA-DSN-CR-003 §字段与脱敏）
+    // 验证不同敏感度级别的字段（CCU-FOTA-DSN-CR-003 §字段与脱敏）
     FotaLogAdapter::orchestrator().info("test.event",
         "Test sensitivity levels",
         {flog::f_str("normal_field", "normal"),
-         flog::f_str("identifier_field", "VIN123", cgw::fw::log::Sensitivity::Identifier),
-         flog::f_str("payload_field", "raw_data", cgw::fw::log::Sensitivity::Payload),
-         flog::f_str("secret_field", "secret", cgw::fw::log::Sensitivity::Secret)}
+         flog::f_str("identifier_field", "VIN123", ccu::fw::log::Sensitivity::Identifier),
+         flog::f_str("payload_field", "raw_data", ccu::fw::log::Sensitivity::Payload),
+         flog::f_str("secret_field", "secret", ccu::fw::log::Sensitivity::Secret)}
     );
 }
 
@@ -98,7 +98,7 @@ TEST_F(FotaLogAdapterTest, GenerateRequestId) {
 }
 
 TEST_F(FotaLogAdapterTest, HexIdFormat) {
-    // 验证十六进制 ID 格式（CGW-FW-SPEC设计 §5.4: 规范十六进制字符串）
+    // 验证十六进制 ID 格式（CCU-FW-SPEC设计 §5.4: 规范十六进制字符串）
     EXPECT_EQ(hex_id(0x1110), "0x1110");
     EXPECT_EQ(hex_id(0x0001), "0x0001");
     EXPECT_EQ(hex_id(0x6101), "0x6101");
@@ -106,4 +106,4 @@ TEST_F(FotaLogAdapterTest, HexIdFormat) {
 }
 
 } // namespace
-} // namespace cgw_fota
+} // namespace ccu_fota

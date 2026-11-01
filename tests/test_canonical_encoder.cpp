@@ -1,11 +1,11 @@
 // =============================================================================
 // tests/test_canonical_encoder.cpp
-// CGW-FOTA 规范化编码器单元测试 (CGW-FOTA-DSN-CR-006 §10.2 / §测试设计)
+// CCU-FOTA 规范化编码器单元测试 (CCU-FOTA-DSN-CR-006 §10.2 / §测试设计)
 // 覆盖：golden bytes、field_count 回填、missing/null/empty/present 互不混淆、
 //       枚举 u32be、列表子记录、长度前缀域。
 // =============================================================================
 
-#include "cgw/fota/fingerprint/canonical_encoder.hpp"
+#include "ccu/fota/fingerprint/canonical_encoder.hpp"
 
 #include <gtest/gtest.h>
 
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-using namespace cgw_fota::fingerprint;
+using namespace ccu_fota::fingerprint;
 
 namespace {
 

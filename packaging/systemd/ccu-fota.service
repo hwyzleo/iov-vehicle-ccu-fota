@@ -1,0 +1,29 @@
+# CCU-FOTA systemd unit (CCU-FOTA-DSN-CR-008 §12.4)
+#
+# FOTA owns this baseline unit. Platform-specific values (User/Group,
+# capability, device allowlist, memory/task/fd limits, enable policy) are
+# fixed by the CCU-BUILD Platform Manifest and applied via an authorized
+# drop-in; the baseline must not default to root.
+#
+# /etc/ccu is read-only; /var/lib/ccu/fota is the only writable state path.
+# SIGTERM triggers the bounded shutdown (CR-007 §11.6); TimeoutStopSec must
+# be >= the application shutdown budget and is CI-checked.
+[Unit]
+Description=CCU FOTA Inventory Service
+After=network.target ccu-diag.service
+Wants=ccu-diag.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ccu-fota
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ccu/fota
+
+[Install]
+WantedBy=multi-user.target

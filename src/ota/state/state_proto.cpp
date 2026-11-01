@@ -1,11 +1,11 @@
 // =============================================================================
 // src/ota/state/state_proto.cpp
-// CGW-FOTA 状态机与 Protobuf 枚举映射 (CGW-FOTA-DSN-CR-011)
+// CCU-FOTA 状态机与 Protobuf 枚举映射 (CCU-FOTA-DSN-CR-011)
 // =============================================================================
 
-#include "cgw/fota/ota/state/state_proto.hpp"
+#include "ccu/fota/ota/state/state_proto.hpp"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 ::vehicle::fota::v1::VehicleTaskStatus toProto(VehicleTaskState s) {
@@ -86,4 +86,4 @@ ExecutionState fromProtoExecution(::vehicle::fota::v1::ExecutionStatus s) {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

@@ -1,11 +1,11 @@
 // =============================================================================
 // src/store/fota_state.cpp
-// CGW-FOTA 状态模型辅助实现 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态模型辅助实现 (CCU-FOTA-DSN-CR-005)
 // =============================================================================
 
-#include "cgw/fota/store/fota_state.hpp"
+#include "ccu/fota/store/fota_state.hpp"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 
 bool jobPhaseFromString(const std::string& s, JobPhase& out) {
@@ -28,4 +28,4 @@ bool triggerReasonFromString(const std::string& s, TriggerReason& out) {
 }
 
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

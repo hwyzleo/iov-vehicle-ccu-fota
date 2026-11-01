@@ -1,19 +1,19 @@
-#include "cgw/fota/config/fota_config.hpp"
-#include "cgw/fota/store/fota_state_store.hpp"
-#include "cgw/fota/store/fota_state_recovery.hpp"
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
-#include "cgw/fota/store/fota_state_migration.hpp"
-#include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
-#include "cgw/fota/ota/ports/production_ports.hpp"
-#include "cgw/fota/daemon/fota_daemon.hpp"
-#include "config.h"          // cgw::fw::config::Config / LoadOptions / ConfigException
+#include "ccu/fota/config/fota_config.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_recovery.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_state_migration.hpp"
+#include "ccu/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
+#include "ccu/fota/ota/ports/production_ports.hpp"
+#include "ccu/fota/daemon/fota_daemon.hpp"
+#include "config.h"          // ccu::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
 #include "snapshot_assembler.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
-#include "cgw/fw/someip/runtime.hpp"
-#include "cgw/fw/someip/types.hpp"
+#include "ccu/fw/someip/runtime.hpp"
+#include "ccu/fw/someip/types.hpp"
 #include <iostream>
 #include <filesystem>
 #include <signal.h>
@@ -23,8 +23,8 @@
 #include <chrono>
 #include <memory>
 
-using namespace cgw_fota;
-namespace someip_fw = cgw::fw::someip;
+using namespace ccu_fota;
+namespace someip_fw = ccu::fw::someip;
 
 volatile bool running = true;
 
@@ -40,29 +40,29 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signalHandler);
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_STARTING,
-        "CGW-FOTA Service Starting"
+        "CCU-FOTA Service Starting"
     );
 
-    // ---- 1. 建立稳定 WorkingDirectory 与 configRoots (CGW-FOTA-DSN-CR-004) ----
+    // ---- 1. 建立稳定 WorkingDirectory 与 configRoots (CCU-FOTA-DSN-CR-004) ----
     namespace fs = std::filesystem;
-    cgw::fw::config::LoadOptions options;
+    ccu::fw::config::LoadOptions options;
     options.cwd = fs::current_path();
-    // 量产默认 /etc/cgw；argv[1] 可指定开发/测试 config 根（需含 common.yaml）。
+    // 量产默认 /etc/ccu；argv[1] 可指定开发/测试 config 根（需含 common.yaml）。
     if (argc > 1) {
         options.configRoots = {fs::path(argv[1])};
     } else {
-        options.configRoots = {"/etc/cgw"};
+        options.configRoots = {"/etc/ccu"};
     }
 
     // ---- 2/3/4. 配置阶段：load + FotaConfig::from + logConfigFrom (统一 fail-closed) ----
-    std::shared_ptr<const cgw::fw::config::ConfigSnapshot> snapshot;
+    std::shared_ptr<const ccu::fw::config::ConfigSnapshot> snapshot;
     FotaConfig fotaConfig;
-    cgw::fw::log::LogConfig log_config;
+    ccu::fw::log::LogConfig log_config;
     try {
-        snapshot = cgw::fw::config::Config::load("fota", options);
+        snapshot = ccu::fw::config::Config::load("fota", options);
         fotaConfig = FotaConfig::from(*snapshot);
         log_config = FotaConfig::logConfigFrom(*snapshot);
-    } catch (const cgw::fw::config::ConfigException& e) {
+    } catch (const ccu::fw::config::ConfigException& e) {
         std::cerr << "FATAL: config error [" << e.code << "] " << e.what()
                   << " (path=" << e.path << ", key=" << e.key << ")" << std::endl;
         return 1;
@@ -72,8 +72,8 @@ int main(int argc, char* argv[]) {
     }
 
     // ---- 初始化 Logger（配置阶段之后、业务模块与 SOME/IP 开放之前）----
-    auto log_result = FotaLogAdapter::init("cgw-fota", log_config);
-    if (log_result.error != cgw::fw::log::LogError::kOk) {
+    auto log_result = FotaLogAdapter::init("ccu-fota", log_config);
+    if (log_result.error != ccu::fw::log::LogError::kOk) {
         std::cerr << "FATAL: Logger init failed: " << log_result.error_message << std::endl;
         return 1;
     }
@@ -85,38 +85,38 @@ int main(int argc, char* argv[]) {
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_LOG_INITIALIZED,
         "Logger initialized successfully",
-        {flog::f_str("service", "cgw-fota"),
-         flog::f_str("log_level", cgw::fw::log::logLevelToString(log_config.level)),
+        {flog::f_str("service", "ccu-fota"),
+         flog::f_str("log_level", ccu::fw::log::logLevelToString(log_config.level)),
          flog::f_bool("strict_mode", log_config.strict)}
     );
 
-    // ---- 5. 打开 Store、格式迁移与状态恢复 (CGW-FOTA-DSN-CR-005) ----
-    std::shared_ptr<cgw_fota::store::FotaStateStore> state_store;
-    cgw_fota::store::RecoveryPlan recovery_plan;
+    // ---- 5. 打开 Store、格式迁移与状态恢复 (CCU-FOTA-DSN-CR-005) ----
+    std::shared_ptr<ccu_fota::store::FotaStateStore> state_store;
+    ccu_fota::store::RecoveryPlan recovery_plan;
     try {
-        auto store_obj = cgw_fota::store::FotaStateStore::open(
+        auto store_obj = ccu_fota::store::FotaStateStore::open(
             fotaConfig.storeRoot, fotaConfig.dedupeMaxEntries, fotaConfig.dedupeTtlMs);
-        state_store = std::make_shared<cgw_fota::store::FotaStateStore>(std::move(store_obj));
-        recovery_plan = cgw_fota::store::StateRecovery::recover(*state_store);
+        state_store = std::make_shared<ccu_fota::store::FotaStateStore>(std::move(store_obj));
+        recovery_plan = ccu_fota::store::StateRecovery::recover(*state_store);
     } catch (const std::exception& e) {
         std::cerr << "FATAL: store open/recovery failed: " << e.what() << std::endl;
         return 1;
     }
 
-    if (recovery_plan.action == cgw_fota::store::RecoveryAction::Blocked) {
+    if (recovery_plan.action == ccu_fota::store::RecoveryAction::Blocked) {
         FotaLogAdapter::orchestrator().error(
-            cgw_fota::fota_events::STORE_RECOVERY_BLOCKED,
+            ccu_fota::fota_events::STORE_RECOVERY_BLOCKED,
             "State recovery blocked, auto/active reporting disabled",
             {flog::f_str("reason", recovery_plan.reason)});
     }
 
     // ---- 契约 B durable 状态恢复：旧 ota.* -> fota.* 迁移 + FotaCloudStateStore ----
-    // (CGW-FOTA-DSN-CR-011 §Store)：迁移失败 fail-closed，不清零业务状态。
-    std::shared_ptr<cgw_fota::store::fota::FotaCloudStateStore> cloud_state_store;
+    // (CCU-FOTA-DSN-CR-011 §Store)：迁移失败 fail-closed，不清零业务状态。
+    std::shared_ptr<ccu_fota::store::fota::FotaCloudStateStore> cloud_state_store;
     try {
         auto raw_store = state_store->underlyingStore();
-        cgw_fota::store::migrateOtaToFota(raw_store);
-        cloud_state_store = std::make_shared<cgw_fota::store::fota::FotaCloudStateStore>(
+        ccu_fota::store::migrateOtaToFota(raw_store);
+        cloud_state_store = std::make_shared<ccu_fota::store::fota::FotaCloudStateStore>(
             std::move(raw_store));
     } catch (const std::exception& e) {
         std::cerr << "FATAL: FOTA durable state recovery failed: " << e.what()
@@ -125,7 +125,7 @@ int main(int argc, char* argv[]) {
     }
 
     // ============================================================
-    // CGW-FOTA-DSN-CR-007: 单 cgw-framework-someip Runtime 接线
+    // CCU-FOTA-DSN-CR-007: 单 ccu-framework-someip Runtime 接线
     // 启动顺序：Config -> Logger -> Store -> 构造 SomeIpConfig/Runtime ->
     //   Provider/Client -> 注册 handler/availability -> runtime.start() ->
     //   request service -> 等待可用 -> offer -> ready/恢复/首次采集
@@ -145,7 +145,7 @@ int main(int argc, char* argv[]) {
     }
 
     // ServiceKey 与 InterfaceVersion（寻址 SSOT = VEH-SOMEIP Registry）
-    // 契约 B：CGW-FOTA 作为 client 访问 TBOX 通用消息服务（0x6101），下行订阅其
+    // 契约 B：CCU-FOTA 作为 client 访问 TBOX 通用消息服务（0x6101），下行订阅其
     // Event；不再提供旧契约 A 的 0x1120 Provider / 0x6101 专用清单提交（已随 CR-011
     // 迁移到通用传输，旧 Method 0x0001 在 TBOX 侧永久保留删除）。
     someip_fw::ServiceKey diagKey{DEFAULT_DIAG_SERVICE_ID, DEFAULT_DIAG_INSTANCE_ID};
@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
     assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
-    assembler->setStateStore(state_store);  // CGW-FOTA-DSN-CR-005: durable 序号分配
+    assembler->setStateStore(state_store);  // CCU-FOTA-DSN-CR-005: durable 序号分配
     assembler->setDiagRetryPolicy(fotaConfig.diagRetry.maxAttempts,
                                   static_cast<uint32_t>(fotaConfig.diagRetry.backoff.count()));
 
@@ -204,26 +204,26 @@ int main(int argc, char* argv[]) {
     }
 
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_READY,
-        "CGW-FOTA Service started successfully",
+        "CCU-FOTA Service started successfully",
         {flog::f_str("someip_application", someIpCfg.application)}
     );
 
     // ============================================================
     // 契约 B：TBOX 通用消息服务（vehicle.fota.v1）生产装配
-    // (CGW-FOTA-DSN-CR-010 §状态与生命周期 / CR-011)
+    // (CCU-FOTA-DSN-CR-010 §状态与生命周期 / CR-011)
     // 复用进程唯一 SomeIpRuntime；Service/Instance 0x6101/0x0001 已由 Registry
     // 分配（constants.h 过渡 SSOT），generic Method/Event/Eventgroup ID 必须来自
     // Registry 分配并经运行配置注入。Registry 未分配/冲突/版本不一致 -> fail-closed
     // （禁止猜测 ID、禁止回退 Fake 或旧私有协议）。
     // ============================================================
-    std::unique_ptr<cgw_fota::daemon::FotaDaemon> fota_daemon;
+    std::unique_ptr<ccu_fota::daemon::FotaDaemon> fota_daemon;
     if (fotaConfig.cloud.enabled) {
-        cgw_fota::someip::TboxGenericTransportAddress tbox_generic_addr;
+        ccu_fota::someip::TboxGenericTransportAddress tbox_generic_addr;
         bool resolved = false;
         try {
-            resolved = cgw_fota::someip::resolveTboxGenericTransport(
+            resolved = ccu_fota::someip::resolveTboxGenericTransport(
                 fotaConfig, tbox_generic_addr);
-        } catch (const cgw_fota::FotaConfigException& e) {
+        } catch (const ccu_fota::FotaConfigException& e) {
             std::cerr << "FATAL: contract B Registry/config error: " << e.what()
                       << std::endl;
             return 1;
@@ -240,23 +240,23 @@ int main(int argc, char* argv[]) {
 
         try {
             // 生产车内端口（复用契约 A 采集；其余 fail-closed 保守占位，独立边界）。
-            auto prod_inv = std::make_shared<cgw_fota::ota::InventoryProviderFromAssembler>(
+            auto prod_inv = std::make_shared<ccu_fota::ota::InventoryProviderFromAssembler>(
                 assembler, fotaConfig.cloud.protocolVersion);
-            auto prod_consent = std::make_shared<cgw_fota::ota::ConservativeConsentProvider>();
-            auto prod_dl = std::make_shared<cgw_fota::ota::ConservativePackageDownloader>();
-            auto prod_cond = std::make_shared<cgw_fota::ota::ConservativeVehicleConditionProvider>();
-            auto prod_exec = std::make_shared<cgw_fota::ota::ConservativeInstallExecutor>();
-            auto prod_log = std::make_shared<cgw_fota::ota::ConservativeLogCollector>();
+            auto prod_consent = std::make_shared<ccu_fota::ota::ConservativeConsentProvider>();
+            auto prod_dl = std::make_shared<ccu_fota::ota::ConservativePackageDownloader>();
+            auto prod_cond = std::make_shared<ccu_fota::ota::ConservativeVehicleConditionProvider>();
+            auto prod_exec = std::make_shared<ccu_fota::ota::ConservativeInstallExecutor>();
+            auto prod_log = std::make_shared<ccu_fota::ota::ConservativeLogCollector>();
 
-            cgw_fota::ota::FotaOrchestratorConfig orch_cfg;
+            ccu_fota::ota::FotaOrchestratorConfig orch_cfg;
             orch_cfg.protocolVersion = fotaConfig.cloud.protocolVersion;
-            orch_cfg.deviceId = "cgw-fota";
+            orch_cfg.deviceId = "ccu-fota";
             orch_cfg.vin = "";  // 设备身份由车辆 provisioning 提供（独立边界）
             orch_cfg.cloudCallTimeout = fotaConfig.cloud.cloudCallTimeout;
             orch_cfg.eventOutboxMax = fotaConfig.cloud.eventOutboxMax;
             orch_cfg.taskCheckInterval = fotaConfig.cloud.taskCheckInterval;
 
-            fota_daemon = cgw_fota::daemon::FotaDaemon::create(
+            fota_daemon = ccu_fota::daemon::FotaDaemon::create(
                 runtime, tbox_generic_addr, fotaConfig.transport, orch_cfg,
                 /*businessTrigger=*/fotaConfig.cloud.enabled,
                 std::move(prod_inv), std::move(prod_consent),
@@ -290,7 +290,7 @@ int main(int argc, char* argv[]) {
     }
 
     // ============================================================
-    // CGW-FOTA-DSN-CR-007 关闭顺序：
+    // CCU-FOTA-DSN-CR-007 关闭顺序：
     //   1. 服务状态 Stopping，Provider 拒绝新请求 (stopOffer)
     //   2. 停止新自动任务并取消业务 retry timer（reporter 生命周期结束）
     //   3. 保存/flush 必要 active_job 状态（Store 持有，析构时 flush）
@@ -299,7 +299,7 @@ int main(int argc, char* argv[]) {
     //   6. runtime.stop()，停止 executor 并验证资源清零
     // ============================================================
     FotaLogAdapter::orchestrator().info(fota_events::SERVICE_SHUTTING_DOWN,
-        "Stopping CGW-FOTA Service..."
+        "Stopping CCU-FOTA Service..."
     );
 
     // 契约 B 关闭顺序（CR-010 §状态与生命周期）：
@@ -314,7 +314,7 @@ int main(int argc, char* argv[]) {
     runtime.stop();                  // 6: 停止 Runtime/executor（幂等）
 
     FotaLogAdapter::orchestrator().info("fota.service.stopped",
-        "CGW-FOTA Service stopped"
+        "CCU-FOTA Service stopped"
     );
 
     return 0;

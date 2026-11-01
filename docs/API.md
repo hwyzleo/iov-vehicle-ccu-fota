@@ -1,4 +1,4 @@
-# CGW-FOTA API Reference
+# CCU-FOTA API Reference
 
 ## SnapshotAssembler
 
@@ -9,7 +9,7 @@ SnapshotAssembler(std::shared_ptr<SomeIpFotaClient> client);
 ```
 
 **Parameters**:
-- `client`: Shared pointer to SOME/IP client for CGW-DIAG communication
+- `client`: Shared pointer to SOME/IP client for CCU-DIAG communication
 
 ### assembleSnapshot
 
@@ -63,10 +63,10 @@ SomeIpFotaClient();
 bool connect(const std::string& ip_address, uint16_t port);
 ```
 
-Connects to CGW-DIAG service.
+Connects to CCU-DIAG service.
 
 **Parameters**:
-- `ip_address`: IP address of CGW-DIAG service
+- `ip_address`: IP address of CCU-DIAG service
 - `port`: Port number
 
 **Returns**: `true` if connected successfully, `false` otherwise
@@ -77,7 +77,7 @@ Connects to CGW-DIAG service.
 bool disconnect();
 ```
 
-Disconnects from CGW-DIAG service.
+Disconnects from CCU-DIAG service.
 
 **Returns**: `true` if disconnected successfully, `false` otherwise
 
@@ -87,7 +87,7 @@ Disconnects from CGW-DIAG service.
 bool isConnected() const;
 ```
 
-Checks if connected to CGW-DIAG service.
+Checks if connected to CCU-DIAG service.
 
 **Returns**: `true` if connected, `false` otherwise
 
@@ -97,7 +97,7 @@ Checks if connected to CGW-DIAG service.
 bool collectVehicleInventory(const std::string& vin, VehicleSoftwareSnapshot& snapshot);
 ```
 
-Collects vehicle inventory from CGW-DIAG.
+Collects vehicle inventory from CCU-DIAG.
 
 **Parameters**:
 - `vin`: Vehicle Identification Number
@@ -206,14 +206,14 @@ Reports software inventory to TBOX with retry mechanism.
 
 ## FotaConfig
 
-CGW-FOTA 通过 cgw-framework-config 获取不可变配置快照，再经 `FotaConfig::from()` 映射为只读业务配置（CGW-FOTA-DSN-CR-004）。业务代码不直接接触 yaml-cpp。
+CCU-FOTA 通过 ccu-framework-config 获取不可变配置快照，再经 `FotaConfig::from()` 映射为只读业务配置（CCU-FOTA-DSN-CR-004）。业务代码不直接接触 yaml-cpp。
 
-Header: `include/cgw/fota/config/fota_config.hpp`
+Header: `include/ccu/fota/config/fota_config.hpp`
 
 ### from
 
 ```cpp
-static FotaConfig from(const cgw::fw::config::ConfigSnapshot& snapshot);
+static FotaConfig from(const ccu::fw::config::ConfigSnapshot& snapshot);
 ```
 
 从不可变快照构建已校验的 `FotaConfig`。任一缺省值以外的不合法类型、越界值、未知字段或跨字段冲突抛 `FotaConfigException`（fail-closed）。
@@ -221,8 +221,8 @@ static FotaConfig from(const cgw::fw::config::ConfigSnapshot& snapshot);
 ### logConfigFrom
 
 ```cpp
-static cgw::fw::log::LogConfig
-logConfigFrom(const cgw::fw::config::ConfigSnapshot& snapshot);
+static ccu::fw::log::LogConfig
+logConfigFrom(const ccu::fw::config::ConfigSnapshot& snapshot);
 ```
 
 从同一快照读取 `common.log.*` 与 `fota.log.*`，构建 Logger 配置。

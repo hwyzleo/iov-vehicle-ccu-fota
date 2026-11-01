@@ -4,30 +4,30 @@
 #include <sstream>
 #include <iomanip>
 
-namespace cgw_fota {
+namespace ccu_fota {
 
-cgw::fw::log::ContextScope make_context_scope(
+ccu::fw::log::ContextScope make_context_scope(
     const std::string& trace_id,
     const std::string& request_id,
     const std::string& session_id
 ) {
-    cgw::fw::log::LogContext ctx;
+    ccu::fw::log::LogContext ctx;
     ctx.trace_id = trace_id;
     ctx.request_id = request_id;
     ctx.session_id = session_id;
-    return cgw::fw::log::ContextScope(std::move(ctx));
+    return ccu::fw::log::ContextScope(std::move(ctx));
 }
 
-cgw::fw::log::ContextScope make_someip_child_scope(
+ccu::fw::log::ContextScope make_someip_child_scope(
     const std::string& service_id,
     const std::string& method_id,
     const std::string& client_id,
     const std::string& remote_endpoint
 ) {
-    cgw::fw::log::LogContext ctx;
+    ccu::fw::log::LogContext ctx;
 
     // 继承当前上下文的 trace_id / request_id
-    const auto* current = cgw::fw::log::ContextScope::current();
+    const auto* current = ccu::fw::log::ContextScope::current();
     if (current) {
         ctx.trace_id = current->trace_id;
         ctx.request_id = current->request_id;
@@ -35,16 +35,16 @@ cgw::fw::log::ContextScope make_someip_child_scope(
     }
 
     // 附加 SOME/IP 调用上下文
-    ctx.someip = std::make_unique<cgw::fw::log::SomeIpContext>();
+    ctx.someip = std::make_unique<ccu::fw::log::SomeIpContext>();
     ctx.someip->service_id = service_id;
     ctx.someip->method_id = method_id;
     ctx.someip->client_id = client_id;
     ctx.someip->remote_endpoint = remote_endpoint;
 
-    return cgw::fw::log::ContextScope(std::move(ctx));
+    return ccu::fw::log::ContextScope(std::move(ctx));
 }
 
-cgw::fw::log::ContextScope make_someip_context_scope(
+ccu::fw::log::ContextScope make_someip_context_scope(
     const std::string& trace_id,
     const std::string& request_id,
     const std::string& service_id,
@@ -52,17 +52,17 @@ cgw::fw::log::ContextScope make_someip_context_scope(
     const std::string& client_id,
     const std::string& remote_endpoint
 ) {
-    cgw::fw::log::LogContext ctx;
+    ccu::fw::log::LogContext ctx;
     ctx.trace_id = trace_id;
     ctx.request_id = request_id;
 
-    ctx.someip = std::make_unique<cgw::fw::log::SomeIpContext>();
+    ctx.someip = std::make_unique<ccu::fw::log::SomeIpContext>();
     ctx.someip->service_id = service_id;
     ctx.someip->method_id = method_id;
     ctx.someip->client_id = client_id;
     ctx.someip->remote_endpoint = remote_endpoint;
 
-    return cgw::fw::log::ContextScope(std::move(ctx));
+    return ccu::fw::log::ContextScope(std::move(ctx));
 }
 
 std::string generate_trace_id() {
@@ -95,4 +95,4 @@ std::string generate_request_id() {
     return oss.str();
 }
 
-} // namespace cgw_fota
+} // namespace ccu_fota

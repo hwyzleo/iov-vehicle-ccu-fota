@@ -1,15 +1,15 @@
 // =============================================================================
 // src/ota/fota_cloud_proxy_via_transport.cpp
-// CGW-FOTA FotaCloudProxy 通用传输适配器实现 (CGW-FOTA-DSN-CR-011 §调用流程)
+// CCU-FOTA FotaCloudProxy 通用传输适配器实现 (CCU-FOTA-DSN-CR-011 §调用流程)
 // =============================================================================
 // 将 12 个强类型 FotaCloudProxy 方法逐一迁移到通用 exchange。业务 payload 使用
 // vehicle.fota.v1 Protobuf 经 FotaMessageCodec 编解码；TransportOutcome 映射为
-// FotaCloudException（保留 CGW-FW-03xx 链）。本文件不推进状态机、不记录敏感内容。
+// FotaCloudException（保留 CCU-FW-03xx 链）。本文件不推进状态机、不记录敏感内容。
 // =============================================================================
 
-#include "cgw/fota/ota/fota_cloud_proxy_via_transport.hpp"
+#include "ccu/fota/ota/fota_cloud_proxy_via_transport.hpp"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 using ::vehicle::fota::v1::ConsentReport;
@@ -54,24 +54,24 @@ void FotaCloudProxyViaTransport::throwFor(TransportOutcome outcome,
     using K = FotaCloudException::Kind;
     switch (outcome) {
         case TransportOutcome::Timeout:
-            throw FotaCloudException(K::Timeout, "CGW-FW-0305",
+            throw FotaCloudException(K::Timeout, "CCU-FW-0305",
                                      std::string(action) + " timeout");
         case TransportOutcome::Unavailable:
-            throw FotaCloudException(K::Unavailable, "CGW-FW-0304",
+            throw FotaCloudException(K::Unavailable, "CCU-FW-0304",
                                      std::string(action) + " unavailable");
         case TransportOutcome::VersionMismatch:
         case TransportOutcome::PayloadTooLarge:
         case TransportOutcome::ProtocolError:
-            throw FotaCloudException(K::Codec, "CGW-FW-0306",
+            throw FotaCloudException(K::Codec, "CCU-FW-0306",
                                      std::string(action) + " protocol error");
         case TransportOutcome::Stopping:
-            throw FotaCloudException(K::Internal, "CGW-FW-0307",
+            throw FotaCloudException(K::Internal, "CCU-FW-0307",
                                      std::string(action) + " stopping");
         case TransportOutcome::Rejected:
         case TransportOutcome::Unknown:
         default:
             // 超时/unknown/rejected 视为可重试，由 FotaOrchestrator 用原业务身份重试。
-            throw FotaCloudException(K::Timeout, "CGW-FW-0305",
+            throw FotaCloudException(K::Timeout, "CCU-FW-0305",
                                      std::string(action) + " unknown outcome");
     }
 }
@@ -192,4 +192,4 @@ PolicyResponse FotaCloudProxyViaTransport::syncPolicy(const PolicyRequest& reque
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

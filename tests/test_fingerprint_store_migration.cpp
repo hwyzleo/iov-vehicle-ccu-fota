@@ -1,19 +1,19 @@
 // =============================================================================
 // tests/test_fingerprint_store_migration.cpp
-// CGW-FOTA Store 指纹迁移与校验测试 (CGW-FOTA-DSN-CR-006 §10.6 / §测试设计)
+// CCU-FOTA Store 指纹迁移与校验测试 (CCU-FOTA-DSN-CR-006 §10.6 / §测试设计)
 // 覆盖：v1(legacy fingerprint)->v2 迁移、v0->v2、v2 往返、Hex/algorithm/
 //       canonicalization 校验 fail-closed、未知指纹放行、版本不匹配不误判。
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include <string>
 
-using namespace cgw_fota;
-using namespace cgw_fota::store;
+using namespace ccu_fota;
+using namespace ccu_fota::store;
 using json = nlohmann::json;
 
 namespace {
@@ -141,7 +141,7 @@ TEST(FingerprintStoreMigrationTest, BadAlgorithmFails) {
 // ===========================================================================
 TEST(FingerprintStoreMigrationTest, BadCanonicalizationFails) {
     json fp = fullFingerprintsJson();
-    fp["canonicalization"] = "cgw-fota-snapshot-v2";  // 未知版本
+    fp["canonicalization"] = "ccu-fota-snapshot-v2";  // 未知版本
     json p = {{"schemaVersion", 2}, {"reportId", "r"}, {"snapshotSeq", 5},
               {"completedAt", 1}, {"registryVersion", "rv"},
               {"overallResult", "ALL_OK"}, {"fingerprints", fp},

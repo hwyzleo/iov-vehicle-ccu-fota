@@ -1,7 +1,7 @@
 #include "data_models.h"
 
-namespace cgw_fota {
+namespace ccu_fota {
 
 // Data models are header-only, no implementation needed
 
-} // namespace cgw_fota
+} // namespace ccu_fota

@@ -1,42 +1,42 @@
 // =============================================================================
 // src/store/fota_cloud_state_serializer.cpp
-// CGW-FOTA 车云 FOTA 状态序列化器实现 (CGW-FOTA-DSN-CR-011 §Store)
+// CCU-FOTA 车云 FOTA 状态序列化器实现 (CCU-FOTA-DSN-CR-011 §Store)
 // =============================================================================
 
-#include "cgw/fota/store/fota_cloud_state_serializer.hpp"
-#include "cgw/fota/store/fota_state_serializer.hpp"  // FTSE envelope 复用
+#include "ccu/fota/store/fota_cloud_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"  // FTSE envelope 复用
 
 #include <nlohmann/json.hpp>
 
-#include <cgw/fw/hash/hex.hpp>  // CGW-FOTA-DSN-CR-006: 可逆 hex 编解码经 framework
+#include <ccu/fw/hash/hex.hpp>  // CCU-FOTA-DSN-CR-006: 可逆 hex 编解码经 framework
 
 #include <stdexcept>
 #include <string_view>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 namespace fota {
 
 using json = nlohmann::json;
-using cgw_fota::store::encodeEnvelope;
-using cgw_fota::store::parseEnvelopeHeader;
-using cgw_fota::store::extractPayload;
-using cgw_fota::store::StateDecodeError;
+using ccu_fota::store::encodeEnvelope;
+using ccu_fota::store::parseEnvelopeHeader;
+using ccu_fota::store::extractPayload;
+using ccu_fota::store::StateDecodeError;
 
 // ===========================================================================
 // proto-binary <-> hex
 // ---------------------------------------------------------------------------
-// CGW-FOTA-DSN-CR-006: FOTA 仓内不实现私有 hex 编码器。proto-binary 的可逆
-// hex 编解码经 cgw-framework-hash 通用工具（<cgw/fw/hash/hex.hpp>）。
+// CCU-FOTA-DSN-CR-006: FOTA 仓内不实现私有 hex 编码器。proto-binary 的可逆
+// hex 编解码经 ccu-framework-hash 通用工具（<ccu/fw/hash/hex.hpp>）。
 // ===========================================================================
 std::string protoBinaryToHex(const std::string& binary) {
-    return cgw::fw::hash::bytesToHex(binary);
+    return ccu::fw::hash::bytesToHex(binary);
 }
 
 std::string hexToProtoBinary(const std::string& hex) {
     try {
-        return cgw::fw::hash::hexToBytes(hex);
-    } catch (const cgw::fw::hash::HexException& e) {
+        return ccu::fw::hash::hexToBytes(hex);
+    } catch (const ccu::fw::hash::HexException& e) {
         if (e.position() != std::string_view::npos) {
             throw StateDecodeError(std::string("proto hex decode failed: ") +
                                    e.code() + " at index " +
@@ -411,4 +411,4 @@ FotaLogJobRecord decodeLogJob(const std::string& bytes) {
 
 } // namespace fota
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

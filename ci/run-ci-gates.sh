@@ -1,16 +1,16 @@
 #!/bin/bash
-# ci/run-ci-gates.sh - CGW-FOTA-DSN-CR-008 §12.7 提交级 CI 门禁编排
+# ci/run-ci-gates.sh - CCU-FOTA-DSN-CR-008 §12.7 提交级 CI 门禁编排
 #
 # Runs the FOTA-repo CR-008 commit-level gates in order:
 #   1. CMake lint (static build contract)
 #   2. systemd unit contract
-#   3. configure + build (HOST) + unit/contract tests (CgwFotaTests)
+#   3. configure + build (HOST) + unit/contract tests (CcuFotaTests)
 #   4. installed Framework SDK consumer (relocatable find_package + 5 targets)
-#   5. DESTDIR install + install-manifest (exact cgw-fota-runtime file set)
+#   5. DESTDIR install + install-manifest (exact ccu-fota-runtime file set)
 #   6. daemon lifecycle smoke (start -> init -> SIGTERM -> bounded stop)
 #
 # TARGET cross-compile / ELF / ABI / NEEDED / RPATH / target-machine business
-# smoke are run by CGW-BUILD (CR-008 §12.6/§12.7) and are not covered here.
+# smoke are run by CCU-BUILD (CR-008 §12.6/§12.7) and are not covered here.
 #
 # Usage: ci/run-ci-gates.sh [--sdk-prefix <dir>] [--build-dir <dir>]
 # Exit: 0 = all pass, 1 = any gate failed.
@@ -18,7 +18,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK_PREFIX="${CGW_FRAMEWORK_PREFIX:-$HOME/.local}"
+SDK_PREFIX="${CCU_FRAMEWORK_PREFIX:-$HOME/.local}"
 BUILD_DIR="${ROOT}/build"
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -58,7 +58,7 @@ rm -rf "$BUILD_DIR"
 if cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DCMAKE_PREFIX_PATH="$SDK_PREFIX" \
-        -DCGWFramework_DIR="$SDK_PREFIX/lib/cmake/CGWFramework" >/dev/null 2>&1 \
+        -DCCUFramework_DIR="$SDK_PREFIX/lib/cmake/CCUFramework" >/dev/null 2>&1 \
    && cmake --build "$BUILD_DIR" -j >/dev/null 2>&1 \
    && ctest --test-dir "$BUILD_DIR" --output-on-failure >/dev/null 2>&1; then
     pass "build+tests"
@@ -73,7 +73,7 @@ run "installed-framework-consumer" cmake -DSDK_PREFIX="$SDK_PREFIX" -P "${ROOT}/
 # 5. DESTDIR install + install manifest
 gate 5 "DESTDIR install + install manifest"
 INSTALL_ROOT="$(mktemp -d -t fota-install.XXXXXX)"
-if env DESTDIR="$INSTALL_ROOT" cmake --install "$BUILD_DIR" --prefix /usr --component cgw-fota-runtime >/dev/null 2>&1; then
+if env DESTDIR="$INSTALL_ROOT" cmake --install "$BUILD_DIR" --prefix /usr --component ccu-fota-runtime >/dev/null 2>&1; then
     run "install-manifest" python3 "${ROOT}/ci/verify-install-manifest.py" "$INSTALL_ROOT"
 else
     fail "DESTDIR install"; FAILURES=$((FAILURES+1))

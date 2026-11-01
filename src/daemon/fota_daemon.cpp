@@ -1,21 +1,21 @@
 // =============================================================================
 // src/daemon/fota_daemon.cpp
-// CGW-FOTA 契约 B daemon 装配实现 (CGW-FOTA-DSN-CR-010/011)
+// CCU-FOTA 契约 B daemon 装配实现 (CCU-FOTA-DSN-CR-010/011)
 // =============================================================================
 
-#include "cgw/fota/daemon/fota_daemon.hpp"
+#include "ccu/fota/daemon/fota_daemon.hpp"
 
-#include "cgw/fota/ota/payload_types.hpp"
+#include "ccu/fota/ota/payload_types.hpp"
 
 #include "vehicle/fota/v1/types.pb.h"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace daemon {
 
-using namespace cgw_fota::ota;
+using namespace ccu_fota::ota;
 
-FotaDaemon::FotaDaemon(cgw::fw::someip::SomeIpRuntime& runtime,
-                       const cgw_fota::someip::TboxGenericTransportAddress& address,
+FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
+                       const ccu_fota::someip::TboxGenericTransportAddress& address,
                        SomeIpTransportConfig transportCfg,
                        FotaOrchestratorConfig orchCfg,
                        bool businessTrigger,
@@ -41,8 +41,8 @@ FotaDaemon::FotaDaemon(cgw::fw::someip::SomeIpRuntime& runtime,
         throw std::invalid_argument("FotaDaemon: ports/store must be non-null");
     }
     // 复用进程唯一 Runtime：只在其上 createClient（不创建第二个 Runtime/application）。
-    cgw::fw::someip::ServiceKey key{address.service, address.instance};
-    cgw::fw::someip::InterfaceVersion ifaceV{address.interfaceVersion.major,
+    ccu::fw::someip::ServiceKey key{address.service, address.instance};
+    ccu::fw::someip::InterfaceVersion ifaceV{address.interfaceVersion.major,
                                              address.interfaceVersion.minor};
     auto client = runtime_.createClient(key, ifaceV);
 
@@ -56,8 +56,8 @@ FotaDaemon::FotaDaemon(cgw::fw::someip::SomeIpRuntime& runtime,
 FotaDaemon::~FotaDaemon() { stop(); }
 
 std::unique_ptr<FotaDaemon> FotaDaemon::create(
-    cgw::fw::someip::SomeIpRuntime& runtime,
-    const cgw_fota::someip::TboxGenericTransportAddress& address,
+    ccu::fw::someip::SomeIpRuntime& runtime,
+    const ccu_fota::someip::TboxGenericTransportAddress& address,
     SomeIpTransportConfig transportCfg,
     FotaOrchestratorConfig orchCfg,
     bool businessTrigger,
@@ -151,4 +151,4 @@ ota::FotaCloudProxyViaTransport& FotaDaemon::cloud() const { return *cloud_; }
 ota::FotaOrchestrator& FotaDaemon::orchestrator() const { return *orch_; }
 
 } // namespace daemon
-} // namespace cgw_fota
+} // namespace ccu_fota

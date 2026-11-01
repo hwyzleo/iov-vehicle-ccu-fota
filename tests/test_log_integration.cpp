@@ -10,17 +10,17 @@
 #include <atomic>
 #include <vector>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace {
 
 class LogIntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        cgw::fw::log::LogConfig config;
-        config.level = cgw::fw::log::LogLevel::kDebug;
+        ccu::fw::log::LogConfig config;
+        config.level = ccu::fw::log::LogLevel::kDebug;
 
-        auto result = FotaLogAdapter::init("cgw-fota-integration-test", config);
-        ASSERT_EQ(result.error, cgw::fw::log::LogError::kOk);
+        auto result = FotaLogAdapter::init("ccu-fota-integration-test", config);
+        ASSERT_EQ(result.error, ccu::fw::log::LogError::kOk);
 
         diag_client_ = std::make_shared<test::TestableDiagInventoryClient>();
         diag_client_->setTestVin("LSVAU2180N2123456");
@@ -34,7 +34,7 @@ protected:
 };
 
 // ============================================================
-// 上下文传播测试（CGW-FOTA-DSN-CR-003 §上下文传播）
+// 上下文传播测试（CCU-FOTA-DSN-CR-003 §上下文传播）
 // ============================================================
 
 TEST_F(LogIntegrationTest, ContextScopeBasics) {
@@ -72,14 +72,14 @@ TEST_F(LogIntegrationTest, ContextScopeNesting) {
 }
 
 TEST_F(LogIntegrationTest, ChildScopeInheritsTraceId) {
-    // 验证子作用域继承 trace_id（CGW-FOTA-DSN-CR-003 §上下文传播 第3点）
+    // 验证子作用域继承 trace_id（CCU-FOTA-DSN-CR-003 §上下文传播 第3点）
     std::string parent_trace = "parent-trace-123";
     std::string parent_req = "parent-req-456";
 
     {
         auto parent_scope = make_context_scope(parent_trace, parent_req);
 
-        // 创建子作用域（模拟调用 CGW-DIAG）
+        // 创建子作用域（模拟调用 CCU-DIAG）
         {
             auto child_scope = make_someip_child_scope("0x1110", "0x0002");
             auto* ctx = current_context();
@@ -129,7 +129,7 @@ TEST_F(LogIntegrationTest, ContextPropagationDuringReport) {
 
 TEST_F(LogIntegrationTest, FullChainContextPropagation) {
     // 模拟全链路：TBOX 请求 -> FOTA -> DIAG -> FOTA -> TBOX
-    // （CGW-FOTA-DSN-CR-003 §上下文传播）
+    // （CCU-FOTA-DSN-CR-003 §上下文传播）
     std::string trace_id = "fullchain-trace-001";
     std::string request_id = "fullchain-req-001";
 
@@ -158,7 +158,7 @@ TEST_F(LogIntegrationTest, FullChainContextPropagation) {
 
 TEST_F(LogIntegrationTest, AutoTriggerIndependentContext) {
     // 自动触发任务生成新的 trace_id 和 request_id
-    // （CGW-FOTA-DSN-CR-003 §上下文传播 第2点）
+    // （CCU-FOTA-DSN-CR-003 §上下文传播 第2点）
     std::string auto_trace = generate_trace_id();
     std::string auto_req = generate_request_id();
 
@@ -179,7 +179,7 @@ TEST_F(LogIntegrationTest, AutoTriggerIndependentContext) {
 
 TEST_F(LogIntegrationTest, AsyncContextCopy) {
     // 异步任务边界显式复制日志上下文
-    // （CGW-FOTA-DSN-CR-003 §上下文传播 第4点）
+    // （CCU-FOTA-DSN-CR-003 §上下文传播 第4点）
     std::string trace_id = "async-trace-001";
     std::string request_id = "async-req-001";
 
@@ -223,7 +223,7 @@ TEST_F(LogIntegrationTest, ReportIdInContext) {
 }
 
 // ============================================================
-// 脱敏测试（CGW-FOTA-DSN-CR-003 §字段与脱敏）
+// 脱敏测试（CCU-FOTA-DSN-CR-003 §字段与脱敏）
 // ============================================================
 
 TEST_F(LogIntegrationTest, VinDesensitization) {
@@ -235,13 +235,13 @@ TEST_F(LogIntegrationTest, VinDesensitization) {
 
         FotaLogAdapter::inventory_reporter().info("test.vin_desensitization",
             "VIN should be masked",
-            {flog::f_str("vin", test_vin, cgw::fw::log::Sensitivity::Identifier)}
+            {flog::f_str("vin", test_vin, ccu::fw::log::Sensitivity::Identifier)}
         );
 
         // VIN 不应直接拼入 message
         FotaLogAdapter::inventory_reporter().info("test.vin_not_in_message",
             "VIN processing result",
-            {flog::f_str("vin_hash", test_vin, cgw::fw::log::Sensitivity::Identifier),
+            {flog::f_str("vin_hash", test_vin, ccu::fw::log::Sensitivity::Identifier),
              flog::f_str("result", "OK")}
         );
     }
@@ -264,7 +264,7 @@ TEST_F(LogIntegrationTest, PayloadDesensitization) {
         std::string raw_payload = "raw_ecu_list_data_with_versions_and_details";
         FotaLogAdapter::snapshot_assembler().info("test.payload_raw",
             "Raw payload test",
-            {flog::f_str("raw_payload", raw_payload, cgw::fw::log::Sensitivity::Payload)}
+            {flog::f_str("raw_payload", raw_payload, ccu::fw::log::Sensitivity::Payload)}
         );
     }
 }
@@ -276,9 +276,9 @@ TEST_F(LogIntegrationTest, SecretFieldRejection) {
 
         FotaLogAdapter::diag_client().info("test.secret_rejection",
             "Secret fields should be rejected",
-            {flog::f_str("seed", "0xABCD1234", cgw::fw::log::Sensitivity::Secret),
-             flog::f_str("key", "0xEF567890", cgw::fw::log::Sensitivity::Secret),
-             flog::f_str("session_key", "session_key_data", cgw::fw::log::Sensitivity::Secret)}
+            {flog::f_str("seed", "0xABCD1234", ccu::fw::log::Sensitivity::Secret),
+             flog::f_str("key", "0xEF567890", ccu::fw::log::Sensitivity::Secret),
+             flog::f_str("session_key", "session_key_data", ccu::fw::log::Sensitivity::Secret)}
         );
 
         // 验证日志可正常执行（框架拒绝 Secret 字段但不崩溃）
@@ -292,12 +292,12 @@ TEST_F(LogIntegrationTest, DeviceSnDesensitization) {
 
     FotaLogAdapter::inventory_reporter().info("test.device_sn",
         "Device SN should be masked",
-        {flog::f_str("device_sn", device_sn, cgw::fw::log::Sensitivity::Identifier)}
+        {flog::f_str("device_sn", device_sn, ccu::fw::log::Sensitivity::Identifier)}
     );
 }
 
 // ============================================================
-// 并发与压力测试（CGW-FOTA-DSN-CR-003 §测试-压力测试）
+// 并发与压力测试（CCU-FOTA-DSN-CR-003 §测试-压力测试）
 // ============================================================
 
 TEST_F(LogIntegrationTest, ConcurrentLogging) {
@@ -328,15 +328,15 @@ TEST_F(LogIntegrationTest, ConcurrentLogging) {
 
 
 // ============================================================
-// 故障降级测试（CGW-FOTA-DSN-CR-003 §故障与性能）
+// 故障降级测试（CCU-FOTA-DSN-CR-003 §故障与性能）
 // ============================================================
 
 TEST_F(LogIntegrationTest, LoggerInitFailure) {
     // 验证 strict 模式下的 fail-closed 行为
-    // （CGW-FOTA-DSN-CR-003 §故障与性能: 严格模式按 framework 约定处理）
-    cgw::fw::log::LogConfig config;
+    // （CCU-FOTA-DSN-CR-003 §故障与性能: 严格模式按 framework 约定处理）
+    ccu::fw::log::LogConfig config;
     config.strict = true;
-    config.level = cgw::fw::log::LogLevel::kInfo;
+    config.level = ccu::fw::log::LogLevel::kInfo;
 
     // 使用空服务名测试（框架可能返回错误或接受）
     auto result = FotaLogAdapter::init("", config);
@@ -346,7 +346,7 @@ TEST_F(LogIntegrationTest, LoggerInitFailure) {
 
 TEST_F(LogIntegrationTest, LoggingDoesNotBlockBusiness) {
     // 验证普通日志故障不阻断业务
-    // （CGW-FOTA-DSN-CR-003 §故障与性能: 普通日志故障不得阻断版本采集与上报）
+    // （CCU-FOTA-DSN-CR-003 §故障与性能: 普通日志故障不得阻断版本采集与上报）
     {
         auto scope = make_context_scope("trace-noblock", "req-noblock");
 
@@ -427,4 +427,4 @@ TEST_F(LogIntegrationTest, AllBusinessEventsEmittedDuringReport) {
 }
 
 } // namespace
-} // namespace cgw_fota
+} // namespace ccu_fota

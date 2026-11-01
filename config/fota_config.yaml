@@ -1,6 +1,6 @@
-# CGW-FOTA Configuration
+# CCU-FOTA Configuration
 
-# 统一日志配置（CGW-FOTA-DSN-CR-003 / CGW-FW-SPEC设计 §4）
+# 统一日志配置（CCU-FOTA-DSN-CR-003 / CCU-FW-SPEC设计 §4）
 common:
   log:
     schema_version: 1
@@ -14,7 +14,7 @@ common:
       enabled: true
     file:
       enabled: false
-      root: /var/log/cgw
+      root: /var/log/ccu
       max_file_size_mb: 20
       max_files: 5
       total_budget_mb: 100
@@ -24,7 +24,7 @@ common:
     format: standard
 
 fota:
-  # 日志服务级覆盖（CGW-FOTA-DSN-CR-003）
+  # 日志服务级覆盖（CCU-FOTA-DSN-CR-003）
   log:
     level: INFO
     modules:
@@ -42,22 +42,22 @@ fota:
   
   # SOME/IP service configuration
   someip:
-    # CGW-DIAG service (CGW-DIAG-DSN-CR-007: Service ID: 0x1110, Instance ID: 0x0001, Transport: TCP, Port: 51110)
+    # CCU-DIAG service (CCU-DIAG-DSN-CR-007: Service ID: 0x1110, Instance ID: 0x0001, Transport: TCP, Port: 51110)
     diag_service:
-      service_id: 0x1110  # CGW-DIAG-DSN-CR-007: updated from 0x7725
+      service_id: 0x1110  # CCU-DIAG-DSN-CR-007: updated from 0x7725
       instance_id: 0x0001
       ip_address: "127.0.0.1"
-      port: 51110  # CGW-DIAG-DSN-CR-007: updated from 30501
+      port: 51110  # CCU-DIAG-DSN-CR-007: updated from 30501
     
-    # TBOX service (CGW-FOTA-DSN-CR-002 updated)
+    # TBOX service (CCU-FOTA-DSN-CR-002 updated)
     # Service ID: 0x6101, Instance ID: 0x0001, Transport: TCP, Port: 56101
     tbox_service:
-      service_id: 0x6101  # CGW-FOTA-DSN-CR-002: updated from 0x0002
+      service_id: 0x6101  # CCU-FOTA-DSN-CR-002: updated from 0x0002
       instance_id: 0x0001
       ip_address: "127.0.0.1"
-      port: 56101  # CGW-FOTA-DSN-CR-002: updated from 30502
+      port: 56101  # CCU-FOTA-DSN-CR-002: updated from 30502
     
-    # FOTA Provider service (CGW-FOTA-DSN-CR-002)
+    # FOTA Provider service (CCU-FOTA-DSN-CR-002)
     # Service ID: 0x1120, Instance ID: 0x0001, Transport: TCP, Port: 51120
     fota_provider:
       service_id: 0x1120
@@ -74,4 +74,4 @@ fota:
   # Logging (legacy fields, superseded by common.log.* / fota.log.* above)
   logging:
     level: "INFO"
-    file: "/var/log/cgw_fota.log"
+    file: "/var/log/ccu_fota.log"

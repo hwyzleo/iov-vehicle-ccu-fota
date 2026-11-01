@@ -1,28 +1,28 @@
 // =============================================================================
-// src/config/fota_config.cpp - CGW-FOTA 配置映射实现 (CGW-FOTA-DSN-CR-004)
+// src/config/fota_config.cpp - CCU-FOTA 配置映射实现 (CCU-FOTA-DSN-CR-004)
 // =============================================================================
-// 从 cgw-framework-config 的 ConfigSnapshot 读取 fota.* 并完成类型/范围/跨字段
+// 从 ccu-framework-config 的 ConfigSnapshot 读取 fota.* 并完成类型/范围/跨字段
 // 校验；从同一快照读取 common.log.* / fota.log.* 构建 LogConfig。不包含 yaml-cpp
 // 直接访问。
 // =============================================================================
 
-#include "cgw/fota/config/fota_config.hpp"
+#include "ccu/fota/config/fota_config.hpp"
 
 #include <algorithm>
 #include <string>
 #include <vector>
 
-namespace cgw_fota {
+namespace ccu_fota {
 
 namespace {
 
-using cgw::fw::config::ConfigSnapshot;
-using cgw::fw::log::LogConfig;
-using cgw::fw::log::LogLevel;
-using cgw::fw::log::logLevelFromString;
-using cgw::fw::someip::SomeIpConfig;
+using ccu::fw::config::ConfigSnapshot;
+using ccu::fw::log::LogConfig;
+using ccu::fw::log::LogLevel;
+using ccu::fw::log::logLevelFromString;
+using ccu::fw::someip::SomeIpConfig;
 
-// 范围契约（CGW-FOTA-REQ-CR-004 / DSN-CR-004）
+// 范围契约（CCU-FOTA-REQ-CR-004 / DSN-CR-004）
 constexpr std::uint32_t kMaxPendingLo = 1;
 constexpr std::uint32_t kMaxPendingHi = 1024;
 constexpr std::uint32_t kRetryAttemptsHi = 10;
@@ -85,7 +85,7 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
                  kMaxPendingLo, kMaxPendingHi);
     c.maxPendingRequests = static_cast<std::uint32_t>(maxPending);
 
-    // dedupe 边界 (CGW-FOTA-DSN-CR-005)
+    // dedupe 边界 (CCU-FOTA-DSN-CR-005)
     std::int64_t dedupeMaxEntries =
         s.getOr<std::int64_t>("fota.inventory.dedupe_max_entries", 100);
     requireRange("fota.inventory.dedupe_max_entries", dedupeMaxEntries,
@@ -97,8 +97,8 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.inventory.dedupe_ttl_ms", dedupeTtl, 0, INT64_MAX);
     c.dedupeTtlMs = dedupeTtl;
 
-    // ---- common.store.root (CGW-FOTA-DSN-CR-005) ----
-    c.storeRoot = s.getOr<std::string>("common.store.root", "/var/lib/cgw");
+    // ---- common.store.root (CCU-FOTA-DSN-CR-005) ----
+    c.storeRoot = s.getOr<std::string>("common.store.root", "/var/lib/ccu");
 
     // ---- diag.* ----
     rejectUnknown(s, "fota.diag",
@@ -123,7 +123,7 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     // ---- tbox.* 已移除：InventoryReporter/TboxInventoryClient 为死代码，
     // fota.tbox.submit_timeout_ms / retry_* 不再解析（见收尾清理）。 ----
 
-    // ---- someip.* (CGW-FOTA-DSN-CR-007/010/011) ----
+    // ---- someip.* (CCU-FOTA-DSN-CR-007/010/011) ----
     rejectUnknown(s, "fota.someip",
                   {"transport", "generic_transport"});
 
@@ -188,11 +188,11 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
         }
     }
 
-    // ---- fota.cloud.* (CGW-FOTA-DSN-CR-009 §13.8 / CR-011 由 fota.ota 收敛) ----
+    // ---- fota.cloud.* (CCU-FOTA-DSN-CR-009 §13.8 / CR-011 由 fota.ota 收敛) ----
     // 旧 fota.ota.* 仅存在于开发环境 -> 直接拒绝；受控发布物由迁移检查器处理。
     if (s.has("fota.ota")) {
         throw FotaConfigException(
-            "fota.ota.* is legacy; use fota.cloud.* (CGW-FOTA-DSN-CR-011)");
+            "fota.ota.* is legacy; use fota.cloud.* (CCU-FOTA-DSN-CR-011)");
     }
     rejectUnknown(s, "fota.cloud",
                   {"enabled", "protocol_version", "task_check_interval_ms",
@@ -223,7 +223,7 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     requireRange("fota.cloud.cloud_call_timeout_ms", cloudCall, 1, INT64_MAX);
     c.cloud.cloudCallTimeout = std::chrono::milliseconds(cloudCall);
 
-    // ---- mock.* (CGW-FOTA-DSN-CR-009 §构建与运行隔离) ----
+    // ---- mock.* (CCU-FOTA-DSN-CR-009 §构建与运行隔离) ----
     // 量产 preset 必须为 OFF；CI 扫描量产链接产物和配置。
     rejectUnknown(s, "fota.mock", {"enabled", "scenario_path", "virtual_clock"});
     c.mock.enabled = s.getOr<bool>("fota.mock.enabled", false);
@@ -243,7 +243,7 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
 LogConfig FotaConfig::logConfigFrom(const ConfigSnapshot& s) {
     LogConfig lc;
 
-    // common.log.*（CGW 公共配置，FOTA 只读消费）
+    // common.log.*（CCU 公共配置，FOTA 只读消费）
     lc.schema_version =
         static_cast<std::uint32_t>(s.getOr<std::int64_t>("common.log.schema_version", 1));
     lc.level = logLevelFromString(s.getOr<std::string>("common.log.level", "INFO"));
@@ -258,7 +258,7 @@ LogConfig FotaConfig::logConfigFrom(const ConfigSnapshot& s) {
     lc.console_config.enabled = s.getOr<bool>("common.log.console.enabled", true);
 
     lc.file_config.enabled = s.getOr<bool>("common.log.file.enabled", false);
-    lc.file_config.root = s.getOr<std::string>("common.log.file.root", "/var/log/cgw");
+    lc.file_config.root = s.getOr<std::string>("common.log.file.root", "/var/log/ccu");
     lc.file_config.max_file_size_mb =
         static_cast<std::uint32_t>(s.getOr<std::int64_t>("common.log.file.max_file_size_mb", 20));
     lc.file_config.max_files =
@@ -288,11 +288,11 @@ LogConfig FotaConfig::logConfigFrom(const ConfigSnapshot& s) {
 }
 
 SomeIpConfig FotaConfig::someIpConfigFrom(const ConfigSnapshot& s) {
-    using namespace cgw::fw::someip;
+    using namespace ccu::fw::someip;
     SomeIpConfig cfg;
 
-    // application identity 固定为 cgw-fota，每进程唯一 (CR-007 §总体架构)
-    cfg.application = "cgw-fota";
+    // application identity 固定为 ccu-fota，每进程唯一 (CR-007 §总体架构)
+    cfg.application = "ccu-fota";
 
     // common.someip.*（公共配置，FOTA 只读消费）
     cfg.routingMode = s.getOr<bool>("common.someip.embedded_routing", false)
@@ -316,7 +316,7 @@ SomeIpConfig FotaConfig::someIpConfigFrom(const ConfigSnapshot& s) {
     cfg.maxRetryTimers =
         static_cast<std::size_t>(s.getOr<std::int64_t>("common.someip.max_retry_timers", 512));
     cfg.registryProfile =
-        s.getOr<std::string>("common.someip.registry_profile", "cgw-fota");
+        s.getOr<std::string>("common.someip.registry_profile", "ccu-fota");
 
     // discovery
     cfg.discovery.enabled = s.getOr<bool>("common.someip.discovery.enabled", true);
@@ -332,4 +332,4 @@ SomeIpConfig FotaConfig::someIpConfigFrom(const ConfigSnapshot& s) {
     return cfg;
 }
 
-} // namespace cgw_fota
+} // namespace ccu_fota

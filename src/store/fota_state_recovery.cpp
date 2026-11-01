@@ -1,9 +1,9 @@
 // =============================================================================
 // src/store/fota_state_recovery.cpp
-// CGW-FOTA 重启状态恢复器实现 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 重启状态恢复器实现 (CCU-FOTA-DSN-CR-005)
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_recovery.hpp"
+#include "ccu/fota/store/fota_state_recovery.hpp"
 
 #include "constants.h"
 #include "fota_log_adapter.h"
@@ -11,7 +11,7 @@
 
 #include <chrono>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 
 namespace {
@@ -201,4 +201,4 @@ bool StateRecovery::reconcileCompleted(FotaStateStore& store, const ActiveJobSta
 }
 
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

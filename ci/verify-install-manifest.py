@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# ci/verify-install-manifest.py - CGW-FOTA-DSN-CR-008 §12.3/§12.5/§验收测试
+# ci/verify-install-manifest.py - CCU-FOTA-DSN-CR-008 §12.3/§12.5/§验收测试
 #
-# Verify the cgw-fota-runtime install component produces an exact, stable file
+# Verify the ccu-fota-runtime install component produces an exact, stable file
 # set under a DESTDIR install-root, with no out-of-bounds / stale / dev files.
 #
 # Usage:
@@ -10,30 +10,30 @@
 # Exit code: 0 = pass, 1 = manifest mismatch (extra/missing/forbidden files).
 #
 # Expected FHS layout (CMAKE_INSTALL_PREFIX=/usr, CR-008 §12.3 staging):
-#   <install-root>/usr/bin/cgw-fota
-#   <install-root>/usr/lib/systemd/system/cgw-fota.service
-#   <install-root>/etc/cgw/conf.d/fota.yaml
-#   <install-root>/usr/share/cgw-fota/schema/fota.schema.yaml
+#   <install-root>/usr/bin/ccu-fota
+#   <install-root>/usr/lib/systemd/system/ccu-fota.service
+#   <install-root>/etc/ccu/conf.d/fota.yaml
+#   <install-root>/usr/share/ccu-fota/schema/fota.schema.yaml
 
 import argparse
 import os
 import sys
 
-# Exact expected relative paths for the cgw-fota-runtime component.
+# Exact expected relative paths for the ccu-fota-runtime component.
 EXPECTED = {
-    "usr/bin/cgw-fota",
-    "usr/lib/systemd/system/cgw-fota.service",
-    "etc/cgw/conf.d/fota.yaml",
-    "usr/share/cgw-fota/schema/fota.schema.yaml",
+    "usr/bin/ccu-fota",
+    "usr/lib/systemd/system/ccu-fota.service",
+    "etc/ccu/conf.d/fota.yaml",
+    "usr/share/ccu-fota/schema/fota.schema.yaml",
 }
 
 # File basenames that MUST NEVER appear in the runtime install (CR-008 §12.3:
 # dev fixtures, tests, source private headers, build tree, lib archive).
 FORBIDDEN_PATTERNS = (
-    "CgwFotaTests",
-    "libcgw_fota_lib",
+    "CcuFotaTests",
+    "libccu_fota_lib",
     "fota_config.yaml",   # dev fixture
-    "common.yaml",        # dev fixture (CGW-BUILD owns platform common.yaml)
+    "common.yaml",        # dev fixture (CCU-BUILD owns platform common.yaml)
     "fota.default.yaml",  # installed renamed as fota.yaml; original must not ship
     "compile_commands.json",
     ".o",
@@ -95,7 +95,7 @@ def main():
             print(f"       ! {f}", file=sys.stderr)
 
     if ok:
-        print(f"[OK] cgw-fota-runtime install manifest exact: "
+        print(f"[OK] ccu-fota-runtime install manifest exact: "
               f"{len(found)} file(s) under {root}")
         for rel in sorted(EXPECTED):
             print(f"     - {rel}")

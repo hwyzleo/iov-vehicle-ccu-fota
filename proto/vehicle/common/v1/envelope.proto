@@ -5,10 +5,10 @@ package vehicle.common.v1;
 option cc_enable_arenas = true;
 
 // =============================================================================
-// vehicle.common.v1 - 公共 Envelope (CGW-FOTA-DSN-CR-011 / VEH-PROTO §5)
+// vehicle.common.v1 - 公共 Envelope (CCU-FOTA-DSN-CR-011 / VEH-PROTO §5)
 // =============================================================================
 // SSOT：本文件与 VEH-PROTO 统一协议仓库 common/v1/envelope.proto 逐项一致。
-// 公共 Envelope 是 CGW、TBOX 与云端之间的稳定通用消息契约：
+// 公共 Envelope 是 CCU、TBOX 与云端之间的稳定通用消息契约：
 //   * 既有业务请求标识字段 1~10（request_id/timestamp_ms/protocol_version/
 //     device_id/vin/vehicle_task_id/execution_id/idempotency_key/payload_type/
 //     payload）保持字段号与语义不变。
@@ -26,7 +26,7 @@ enum MessageKind {
   MESSAGE_KIND_EVENT = 3;      // 下行事件/单向事件
 }
 
-// 跨 CGW、TBOX 与云端的调用链关联（非业务身份/幂等身份/安全凭据）。
+// 跨 CCU、TBOX 与云端的调用链关联（非业务身份/幂等身份/安全凭据）。
 message TraceContext {
   string trace_id = 1;
   optional string parent_span_id = 2;

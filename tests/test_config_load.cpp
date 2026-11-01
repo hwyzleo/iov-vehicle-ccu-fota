@@ -1,23 +1,23 @@
 // =============================================================================
-// tests/test_config_load.cpp - cgw-framework-config 加载/解析测试 (CGW-FOTA-DSN-CR-004)
+// tests/test_config_load.cpp - ccu-framework-config 加载/解析测试 (CCU-FOTA-DSN-CR-004)
 // =============================================================================
 // 验证六阶段顺序、first-match、ordered-overlay、来源标签、稳定 CWD，以及故障
 // fail-closed：不可读文件、非法 YAML 均不静默回退。开发夹具 fota.yaml 可经
 // stage 4（./config/<svc>.yaml）加载。
 
-#include "cgw/fota/config/fota_config.hpp"
+#include "ccu/fota/config/fota_config.hpp"
 #include "config.h"
 #include "config_types.h"
 #include "config_test_util.h"
 
 #include <gtest/gtest.h>
 
-using cgw::fw::config::Config;
-using cgw::fw::config::ConfigException;
-using cgw::fw::config::LoadOptions;
-using cgw::fw::config::ConfigSnapshot;
-using cgw_fota::FotaConfig;
-using cgw_fota_test::TempDir;
+using ccu::fw::config::Config;
+using ccu::fw::config::ConfigException;
+using ccu::fw::config::LoadOptions;
+using ccu::fw::config::ConfigSnapshot;
+using ccu_fota::FotaConfig;
+using ccu_fota_test::TempDir;
 
 // 最小加载：common.yaml + conf.d/fota.yaml
 TEST(ConfigLoadTest, MinimalLoadSucceeds) {
@@ -32,7 +32,7 @@ TEST(ConfigLoadTest, MinimalLoadSucceeds) {
     EXPECT_EQ(snap->get<std::int64_t>("fota.inventory.max_pending_requests"), 16);
 }
 
-// stage 1 缺失 common.yaml -> CGW-FW-0001（fail-closed）
+// stage 1 缺失 common.yaml -> CCU-FW-0001（fail-closed）
 TEST(ConfigLoadTest, MissingCommonYamlFailsClosed) {
     TempDir root;
     // 仅提供 fota.yaml，无 common.yaml
@@ -43,12 +43,12 @@ TEST(ConfigLoadTest, MissingCommonYamlFailsClosed) {
         Config::load("fota", LoadOptions{{root.path}, TempDir().path});
     } catch (const ConfigException& e) {
         threw = true;
-        EXPECT_EQ(e.code, "CGW-FW-0001");
+        EXPECT_EQ(e.code, "CCU-FW-0001");
     }
     EXPECT_TRUE(threw);
 }
 
-// 非法 YAML -> fail-closed（CGW-FW-0002）
+// 非法 YAML -> fail-closed（CCU-FW-0002）
 TEST(ConfigLoadTest, IllegalYamlFailsClosed) {
     TempDir root;
     root.writeCommonYaml();
@@ -60,12 +60,12 @@ TEST(ConfigLoadTest, IllegalYamlFailsClosed) {
         Config::load("fota", LoadOptions{{root.path}, TempDir().path});
     } catch (const ConfigException& e) {
         threw = true;
-        EXPECT_EQ(e.code, "CGW-FW-0002");
+        EXPECT_EQ(e.code, "CCU-FW-0002");
     }
     EXPECT_TRUE(threw);
 }
 
-// found-but-unreadable：common.yaml 是目录而非常规文件 -> CGW-FW-0001，不回退
+// found-but-unreadable：common.yaml 是目录而非常规文件 -> CCU-FW-0001，不回退
 TEST(ConfigLoadTest, UnreadableCommonFailsClosedNoFallback) {
     TempDir root;
     root.mkdir("common.yaml");  // 目录而非常规文件
@@ -76,7 +76,7 @@ TEST(ConfigLoadTest, UnreadableCommonFailsClosedNoFallback) {
         Config::load("fota", LoadOptions{{root.path}, TempDir().path});
     } catch (const ConfigException& e) {
         threw = true;
-        EXPECT_EQ(e.code, "CGW-FW-0001");
+        EXPECT_EQ(e.code, "CCU-FW-0001");
     }
     EXPECT_TRUE(threw);
 }

@@ -1,5 +1,5 @@
 #!/bin/bash
-# ci/verify-no-test-doubles-in-production.sh - CGW-FOTA-DSN-CR-009 §构建与运行隔离
+# ci/verify-no-test-doubles-in-production.sh - CCU-FOTA-DSN-CR-009 §构建与运行隔离
 #
 # 量产门禁：验证量产 daemon 制品与配置不含 Mock / 测试桩 / 测试云地址 / 测试凭据。
 #   1. 量产 configure 不得定义 FOTA_ENABLE_TEST_DOUBLES
@@ -41,7 +41,7 @@ fi
 # ---------------------------------------------------------------------------
 # 2. 量产 daemon 二进制不得含 Mock / test_double 符号
 # ---------------------------------------------------------------------------
-DAEMON="${BUILD_DIR}/cgw-fota"
+DAEMON="${BUILD_DIR}/ccu-fota"
 if [[ -f "$DAEMON" ]]; then
     # nm 符号表扫描；匹配 MockCloudProxy / MockInstallExecutor / test_double 等
     if nm "$DAEMON" 2>/dev/null | grep -Ei "Mock(CloudProxy|InstallExecutor|InventoryProvider|PackageDownloader|VehicleConditionProvider|ConsentProvider|LogCollector)|test_double" >/dev/null; then

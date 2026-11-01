@@ -1,23 +1,23 @@
 // =============================================================================
 // tests/someip/fota_someip_test_util.h
-// CGW-FOTA SOME/IP 契约测试工具 (CGW-FOTA-DSN-CR-007 §测试设计)
+// CCU-FOTA SOME/IP 契约测试工具 (CCU-FOTA-DSN-CR-007 §测试设计)
 // =============================================================================
-// 使用 cgw-framework-someip 公开 API（SomeIpRuntime::create 默认后端 =
+// 使用 ccu-framework-someip 公开 API（SomeIpRuntime::create 默认后端 =
 // 确定性 FakeSomeIpBackend，CR-005 §15 step 1）+ FOTA 自实现的 InlineExecutor /
 // DiagnosticsSink，不依赖框架私有测试工具。Provider/Client 在进程内直接通信。
 // =============================================================================
 #pragma once
 
-#include "cgw/fw/someip/runtime.hpp"
-#include "cgw/fw/someip/types.hpp"
+#include "ccu/fw/someip/runtime.hpp"
+#include "ccu/fw/someip/types.hpp"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace cgw_fota_test {
+namespace ccu_fota_test {
 
-namespace someip_fw = cgw::fw::someip;
+namespace someip_fw = ccu::fw::someip;
 
 // 同步执行所有 post 的任务；确定、单线程，适合大多数单元/契约测试。
 class InlineExecutor : public someip_fw::Executor {
@@ -53,7 +53,7 @@ private:
 };
 
 // 最小有效测试配置（jitterPercent=0 确定性退避）。
-inline someip_fw::SomeIpConfig makeTestConfig(const std::string& app = "cgw-fota-test") {
+inline someip_fw::SomeIpConfig makeTestConfig(const std::string& app = "ccu-fota-test") {
     someip_fw::SomeIpConfig cfg;
     cfg.application = app;
     cfg.routingMode = someip_fw::RoutingMode::External;
@@ -71,8 +71,8 @@ inline someip_fw::SomeIpConfig makeTestConfig(const std::string& app = "cgw-fota
     cfg.maxClients = 8;
     cfg.maxSubscriptionsPerClient = 16;
     cfg.maxRetryTimers = 64;
-    cfg.registryProfile = "cgw-fota-test";
+    cfg.registryProfile = "ccu-fota-test";
     return cfg;
 }
 
-} // namespace cgw_fota_test
+} // namespace ccu_fota_test

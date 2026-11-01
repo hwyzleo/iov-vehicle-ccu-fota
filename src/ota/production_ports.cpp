@@ -1,19 +1,19 @@
 // =============================================================================
 // src/ota/production_ports.cpp
-// CGW-FOTA 契约 B 生产车内端口适配实现 (CGW-FOTA-DSN-CR-009/010/011)
+// CCU-FOTA 契约 B 生产车内端口适配实现 (CCU-FOTA-DSN-CR-009/010/011)
 // =============================================================================
 // 复用契约 A SnapshotAssembler 生成 FULL 清单；其余边界以 fail-closed 保守实现
 // 占位（独立治理边界，由后续配对 CR 替换为真实来源）。不包含测试桩/Mock。
 // =============================================================================
 
-#include "cgw/fota/ota/ports/production_ports.hpp"
+#include "ccu/fota/ota/ports/production_ports.hpp"
 
-#include "cgw/fw/hash/sha256.hpp"
+#include "ccu/fw/hash/sha256.hpp"
 
 #include <chrono>
 #include <sstream>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 namespace {
@@ -67,7 +67,7 @@ CollectedInventory InventoryProviderFromAssembler::collectInventory(
     }
     // ecuListDigest：对规范化的 ECU 列表计算 SHA-256（确定性；用于任务检测/对账）。
     info.ecuListDigest.set_algorithm("sha-256");
-    info.ecuListDigest.set_value_hex(cgw::fw::hash::sha256_hex(canon.str()));
+    info.ecuListDigest.set_value_hex(ccu::fw::hash::sha256_hex(canon.str()));
     return info;
 }
 
@@ -164,4 +164,4 @@ LogPackage ConservativeLogCollector::collect(const LogCollectScope&) {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

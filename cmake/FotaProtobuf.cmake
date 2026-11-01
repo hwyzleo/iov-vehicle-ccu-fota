@@ -1,6 +1,6 @@
-# cmake/FotaProtobuf.cmake - CGW-FOTA-DSN-CR-011 §Protobuf SSOT 与生成
+# cmake/FotaProtobuf.cmake - CCU-FOTA-DSN-CR-011 §Protobuf SSOT 与生成
 #
-# CGW-FOTA 仓库内冻结的 vehicle.common.v1 / vehicle.fota.v1 proto 契约，
+# CCU-FOTA 仓库内冻结的 vehicle.common.v1 / vehicle.fota.v1 proto 契约，
 # 与 VEH-PROTO 统一协议仓库逐项一致（迁移步骤1，一次性替换旧 ota 契约）。
 # 使用 proto3；protoc 生成 C++；CI 后续可扩展跨语言生成与 breaking-change 检查。
 #
@@ -63,14 +63,14 @@ add_custom_command(
             --experimental_allow_proto3_optional
             ${FOTA_PROTO_FILES}
     DEPENDS ${FOTA_PROTO_FILES}
-    COMMENT "Generating C++ from vehicle.* proto (CGW-FOTA-DSN-CR-011)"
+    COMMENT "Generating C++ from vehicle.* proto (CCU-FOTA-DSN-CR-011)"
     VERBATIM)
 
 # 内部生成库（不安装、不导出）。daemon 与 tests 通过 PRIVATE 链接消费。
-add_library(cgw_fota_proto STATIC ${FOTA_PROTO_GENERATED_SOURCES})
-target_include_directories(cgw_fota_proto PUBLIC "${FOTA_PROTO_GEN_DIR}")
-target_compile_features(cgw_fota_proto PUBLIC cxx_std_20)
-target_link_libraries(cgw_fota_proto PUBLIC protobuf::libprotobuf)
+add_library(ccu_fota_proto STATIC ${FOTA_PROTO_GENERATED_SOURCES})
+target_include_directories(ccu_fota_proto PUBLIC "${FOTA_PROTO_GEN_DIR}")
+target_compile_features(ccu_fota_proto PUBLIC cxx_std_20)
+target_link_libraries(ccu_fota_proto PUBLIC protobuf::libprotobuf)
 
 # 让 protoc 生成的 .pb.h 在 IDE 中可见。
-add_custom_target(cgw_fota_proto_headers DEPENDS ${FOTA_PROTO_GENERATED_HEADERS})
+add_custom_target(ccu_fota_proto_headers DEPENDS ${FOTA_PROTO_GENERATED_HEADERS})

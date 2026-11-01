@@ -1,20 +1,20 @@
 // =============================================================================
 // tests/someip/tbox_generic_transport_contract_test.cpp
-// CGW-FOTA 契约 B TBOX 通用消息服务寻址解析测试 (CR-010/011 fail-closed)
+// CCU-FOTA 契约 B TBOX 通用消息服务寻址解析测试 (CR-010/011 fail-closed)
 // =============================================================================
 // 覆盖：未分配（blocked）、完整合法分配、部分声明、越界、与契约 A 专用 Method
 // 冲突、接口版本不一致。任何冲突/版本不一致必须抛 FotaConfigException（fail-
 // closed），绝不回退 Fake 或旧私有协议。
 // =============================================================================
 
-#include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
-#include "cgw/fota/config/fota_config.hpp"
+#include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
+#include "ccu/fota/config/fota_config.hpp"
 #include "constants.h"
 
 #include <gtest/gtest.h>
 
-using namespace cgw_fota;
-using namespace cgw_fota::someip;
+using namespace ccu_fota;
+using namespace ccu_fota::someip;
 
 namespace {
 

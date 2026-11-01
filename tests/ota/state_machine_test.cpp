@@ -1,15 +1,15 @@
 // =============================================================================
 // tests/ota/state_machine_test.cpp
-// CGW-FOTA VehicleTask / Execution 状态机单元测试 (CGW-FOTA-DSN-CR-009 §13.2 / CR-011)
+// CCU-FOTA VehicleTask / Execution 状态机单元测试 (CCU-FOTA-DSN-CR-009 §13.2 / CR-011)
 // =============================================================================
 
-#include "cgw/fota/ota/state/execution_state.hpp"
-#include "cgw/fota/ota/state/state_proto.hpp"
-#include "cgw/fota/ota/state/vehicle_task_state.hpp"
+#include "ccu/fota/ota/state/execution_state.hpp"
+#include "ccu/fota/ota/state/state_proto.hpp"
+#include "ccu/fota/ota/state/vehicle_task_state.hpp"
 
 #include <gtest/gtest.h>
 
-using namespace cgw_fota::ota;
+using namespace ccu_fota::ota;
 
 // ---------------------------------------------------------------------------
 // VehicleTask 状态机：文档转换路径

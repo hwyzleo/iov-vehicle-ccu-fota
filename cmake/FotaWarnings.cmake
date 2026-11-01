@@ -1,4 +1,4 @@
-# cmake/FotaWarnings.cmake - CGW-FOTA-DSN-CR-008 §12
+# cmake/FotaWarnings.cmake - CCU-FOTA-DSN-CR-008 §12
 #
 # Per-target warning / sanitizer / coverage application.
 #

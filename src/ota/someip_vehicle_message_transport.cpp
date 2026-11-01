@@ -1,14 +1,14 @@
 // =============================================================================
 // src/ota/someip_vehicle_message_transport.cpp
-// CGW-FOTA 量产 SOME/IP 通用车云消息传输实现 (CGW-FOTA-DSN-CR-010/011)
+// CCU-FOTA 量产 SOME/IP 通用车云消息传输实现 (CCU-FOTA-DSN-CR-010/011)
 // =============================================================================
 
-#include "cgw/fota/ota/someip_vehicle_message_transport.hpp"
+#include "ccu/fota/ota/someip_vehicle_message_transport.hpp"
 
 #include <algorithm>
 #include <utility>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 using ::vehicle::common::v1::MESSAGE_KIND_EVENT;
@@ -56,19 +56,19 @@ bool expired(const VehicleMessageEnvelope& env) {
 // ---------------------------------------------------------------------------
 // 传输结果映射
 // ---------------------------------------------------------------------------
-TransportOutcome mapCallResultToOutcome(const cgw::fw::someip::CallResult& result) {
+TransportOutcome mapCallResultToOutcome(const ccu::fw::someip::CallResult& result) {
     if (result.success) return TransportOutcome::Accepted;
-    // CGW-FW-03xx 链（CR-005 §12）。只描述本地受理/可用性/版本/超时/容量/协议结果。
+    // CCU-FW-03xx 链（CR-005 §12）。只描述本地受理/可用性/版本/超时/容量/协议结果。
     const std::string& code = result.code;
-    if (code == "CGW-FW-0305") return TransportOutcome::Timeout;
-    if (code == "CGW-FW-0306") return TransportOutcome::ProtocolError;
-    if (code == "CGW-FW-0307" || code == "CGW-FW-0309") return TransportOutcome::Rejected;
-    if (code == "CGW-FW-0308") return TransportOutcome::Rejected;
-    if (code == "CGW-FW-0310") return TransportOutcome::Stopping;
-    if (code == "CGW-FW-0301" || code == "CGW-FW-0302" || code == "CGW-FW-0303") {
+    if (code == "CCU-FW-0305") return TransportOutcome::Timeout;
+    if (code == "CCU-FW-0306") return TransportOutcome::ProtocolError;
+    if (code == "CCU-FW-0307" || code == "CCU-FW-0309") return TransportOutcome::Rejected;
+    if (code == "CCU-FW-0308") return TransportOutcome::Rejected;
+    if (code == "CCU-FW-0310") return TransportOutcome::Stopping;
+    if (code == "CCU-FW-0301" || code == "CCU-FW-0302" || code == "CCU-FW-0303") {
         return TransportOutcome::Unavailable;
     }
-    if (code == "CGW-FW-0304") {
+    if (code == "CCU-FW-0304") {
         // 不可用/版本不匹配；调用方按 client availability 区分 VersionMismatch。
         return TransportOutcome::Unavailable;
     }
@@ -111,8 +111,8 @@ TransportOutcome validateInboundEnvelope(const VehicleMessageEnvelope& env,
 // 构造 / 析构
 // ---------------------------------------------------------------------------
 SomeIpVehicleMessageTransport::SomeIpVehicleMessageTransport(
-    cgw::fw::someip::Client client,
-    const cgw_fota::someip::TboxGenericTransportAddress& address,
+    ccu::fw::someip::Client client,
+    const ccu_fota::someip::TboxGenericTransportAddress& address,
     SomeIpTransportConfig cfg)
     : client_(std::move(client))
     , address_(address)
@@ -141,9 +141,9 @@ void SomeIpVehicleMessageTransport::start() {
         const int waitMs = static_cast<int>(cfg_.availabilityWait.count());
         for (int i = 0; i < waitMs; ++i) {
             auto a = client_.availability();
-            if (a == cgw::fw::someip::Availability::Available ||
-                a == cgw::fw::someip::Availability::VersionMismatch ||
-                a == cgw::fw::someip::Availability::Stopping) {
+            if (a == ccu::fw::someip::Availability::Available ||
+                a == ccu::fw::someip::Availability::VersionMismatch ||
+                a == ccu::fw::someip::Availability::Stopping) {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -163,7 +163,7 @@ void SomeIpVehicleMessageTransport::start() {
     // 绝不在 SOME/IP I/O 线程推进业务状态机。
     downlinkSub_ = client_.subscribe(
         address_.eventgroup, address_.event,
-        [this](const cgw::fw::someip::EventContext& ec, cgw::fw::someip::PayloadView v) {
+        [this](const ccu::fw::someip::EventContext& ec, ccu::fw::someip::PayloadView v) {
             onDownlinkEvent(ec, v);
         });
 }
@@ -205,7 +205,7 @@ void SomeIpVehicleMessageTransport::stop() {
     }
 }
 
-cgw::fw::someip::Availability SomeIpVehicleMessageTransport::availability() const {
+ccu::fw::someip::Availability SomeIpVehicleMessageTransport::availability() const {
     return client_.availability();
 }
 
@@ -271,9 +271,9 @@ TransportResult<VehicleMessage> SomeIpVehicleMessageTransport::exchange(
         return {TransportOutcome::PayloadTooLarge, {}};
     }
 
-    cgw::fw::someip::CallOptions co;
+    ccu::fw::someip::CallOptions co;
     co.timeout = timeout;
-    co.retry = cgw::fw::someip::RetryMode::None;  // framework 自动重试保持关闭
+    co.retry = ccu::fw::someip::RetryMode::None;  // framework 自动重试保持关闭
     co.maxRetries = 0;
 
     auto fut = client_.callAsync(address_.method, std::move(wire), co);
@@ -287,7 +287,7 @@ TransportResult<VehicleMessage> SomeIpVehicleMessageTransport::exchange(
     if (!result.success) {
         auto mapped = mapCallResultToOutcome(result);
         if (mapped == TransportOutcome::Unavailable &&
-            client_.availability() == cgw::fw::someip::Availability::VersionMismatch) {
+            client_.availability() == ccu::fw::someip::Availability::VersionMismatch) {
             return {TransportOutcome::VersionMismatch, {}};
         }
         return {mapped, {}};
@@ -330,9 +330,9 @@ TransportResult<void> SomeIpVehicleMessageTransport::publish(const VehicleMessag
     auto timeout = std::min(ctx.timeout, cfg_.exchangeTimeout);
     if (timeout.count() <= 0) timeout = cfg_.exchangeTimeout;
 
-    cgw::fw::someip::CallOptions co;
+    ccu::fw::someip::CallOptions co;
     co.timeout = timeout;
-    co.retry = cgw::fw::someip::RetryMode::None;
+    co.retry = ccu::fw::someip::RetryMode::None;
     co.maxRetries = 0;
 
     auto fut = client_.callAsync(address_.method, std::move(wire), co);
@@ -343,7 +343,7 @@ TransportResult<void> SomeIpVehicleMessageTransport::publish(const VehicleMessag
     if (!result.success) {
         auto mapped = mapCallResultToOutcome(result);
         if (mapped == TransportOutcome::Unavailable &&
-            client_.availability() == cgw::fw::someip::Availability::VersionMismatch) {
+            client_.availability() == ccu::fw::someip::Availability::VersionMismatch) {
             return {TransportOutcome::VersionMismatch};
         }
         return {mapped};
@@ -405,7 +405,7 @@ void SomeIpVehicleMessageTransport::workerLoop() {
 }
 
 void SomeIpVehicleMessageTransport::onDownlinkEvent(
-    const cgw::fw::someip::EventContext&, cgw::fw::someip::PayloadView view) {
+    const ccu::fw::someip::EventContext&, ccu::fw::someip::PayloadView view) {
     // framework executor 上：只做基础校验 + 投递到有界队列，不推进业务状态机。
     if (stopping_.load()) return;
     if (view.data == nullptr || view.size == 0) return;
@@ -445,4 +445,4 @@ std::uint64_t SomeIpVehicleMessageTransport::downlinkDropped() const {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

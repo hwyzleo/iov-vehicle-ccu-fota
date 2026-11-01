@@ -5,22 +5,22 @@
 #include "data_models.h"
 #include <regex>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace {
 
 class LogEventsTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        cgw::fw::log::LogConfig config;
-        config.level = cgw::fw::log::LogLevel::kDebug;
+        ccu::fw::log::LogConfig config;
+        config.level = ccu::fw::log::LogLevel::kDebug;
 
-        auto result = FotaLogAdapter::init("cgw-fota-events-test", config);
-        ASSERT_EQ(result.error, cgw::fw::log::LogError::kOk);
+        auto result = FotaLogAdapter::init("ccu-fota-events-test", config);
+        ASSERT_EQ(result.error, ccu::fw::log::LogError::kOk);
     }
 };
 
 // ============================================================
-// 事件名格式验证（CGW-FOTA-DSN-CR-003 §事件目录）
+// 事件名格式验证（CCU-FOTA-DSN-CR-003 §事件目录）
 // ============================================================
 TEST_F(LogEventsTest, EventNameFormat) {
     // 验证事件名格式：fota.<module>.<action> 或 fota.<module>.<submodule>.<action>
@@ -51,37 +51,37 @@ TEST_F(LogEventsTest, AllModuleLoggersCallable) {
 }
 
 // ============================================================
-// 错误码映射验证（CGW-FOTA-DSN-CR-003 §事件目录）
+// 错误码映射验证（CCU-FOTA-DSN-CR-003 §事件目录）
 // ============================================================
 TEST_F(LogEventsTest, ErrorCodeMapping) {
     // 验证 FOTA 业务错误码在正确范围内
-    EXPECT_GE(static_cast<int>(ErrorCode::CGW_FOTA_1003), 1100);
-    EXPECT_LE(static_cast<int>(ErrorCode::CGW_FOTA_1003), 1199);
-    EXPECT_GE(static_cast<int>(ErrorCode::CGW_FOTA_1004), 1100);
-    EXPECT_LE(static_cast<int>(ErrorCode::CGW_FOTA_1004), 1199);
-    EXPECT_GE(static_cast<int>(ErrorCode::CGW_FOTA_1005), 1100);
-    EXPECT_LE(static_cast<int>(ErrorCode::CGW_FOTA_1005), 1199);
-    EXPECT_GE(static_cast<int>(ErrorCode::CGW_FOTA_1006), 1100);
-    EXPECT_LE(static_cast<int>(ErrorCode::CGW_FOTA_1006), 1199);
+    EXPECT_GE(static_cast<int>(ErrorCode::CCU_FOTA_1003), 1100);
+    EXPECT_LE(static_cast<int>(ErrorCode::CCU_FOTA_1003), 1199);
+    EXPECT_GE(static_cast<int>(ErrorCode::CCU_FOTA_1004), 1100);
+    EXPECT_LE(static_cast<int>(ErrorCode::CCU_FOTA_1004), 1199);
+    EXPECT_GE(static_cast<int>(ErrorCode::CCU_FOTA_1005), 1100);
+    EXPECT_LE(static_cast<int>(ErrorCode::CCU_FOTA_1005), 1199);
+    EXPECT_GE(static_cast<int>(ErrorCode::CCU_FOTA_1006), 1100);
+    EXPECT_LE(static_cast<int>(ErrorCode::CCU_FOTA_1006), 1199);
 
     // 验证错误码可转换为字符串
-    EXPECT_FALSE(errorCodeToString(ErrorCode::CGW_FOTA_1003).empty());
-    EXPECT_FALSE(errorCodeToString(ErrorCode::CGW_FOTA_1004).empty());
-    EXPECT_FALSE(errorCodeToString(ErrorCode::CGW_FOTA_1005).empty());
-    EXPECT_FALSE(errorCodeToString(ErrorCode::CGW_FOTA_1006).empty());
+    EXPECT_FALSE(errorCodeToString(ErrorCode::CCU_FOTA_1003).empty());
+    EXPECT_FALSE(errorCodeToString(ErrorCode::CCU_FOTA_1004).empty());
+    EXPECT_FALSE(errorCodeToString(ErrorCode::CCU_FOTA_1005).empty());
+    EXPECT_FALSE(errorCodeToString(ErrorCode::CCU_FOTA_1006).empty());
 }
 
 TEST_F(LogEventsTest, FrameworkErrorCodes) {
-    // 验证 framework 错误码（CGW-FW-0201~0205）
-    EXPECT_EQ(static_cast<uint32_t>(cgw::fw::log::LogError::kConfigInvalid), 201);
-    EXPECT_EQ(static_cast<uint32_t>(cgw::fw::log::LogError::kInitFailed), 202);
-    EXPECT_EQ(static_cast<uint32_t>(cgw::fw::log::LogError::kSinkFailed), 203);
-    EXPECT_EQ(static_cast<uint32_t>(cgw::fw::log::LogError::kQueueOverflow), 204);
-    EXPECT_EQ(static_cast<uint32_t>(cgw::fw::log::LogError::kSensitiveViolation), 205);
+    // 验证 framework 错误码（CCU-FW-0201~0205）
+    EXPECT_EQ(static_cast<uint32_t>(ccu::fw::log::LogError::kConfigInvalid), 201);
+    EXPECT_EQ(static_cast<uint32_t>(ccu::fw::log::LogError::kInitFailed), 202);
+    EXPECT_EQ(static_cast<uint32_t>(ccu::fw::log::LogError::kSinkFailed), 203);
+    EXPECT_EQ(static_cast<uint32_t>(ccu::fw::log::LogError::kQueueOverflow), 204);
+    EXPECT_EQ(static_cast<uint32_t>(ccu::fw::log::LogError::kSensitiveViolation), 205);
 }
 
 // ============================================================
-// 事件字段验证（CGW-FOTA-DSN-CR-003 §事件目录 / §字段与脱敏）
+// 事件字段验证（CCU-FOTA-DSN-CR-003 §事件目录 / §字段与脱敏）
 // ============================================================
 TEST_F(LogEventsTest, InventoryRequestAcceptedFields) {
     // fota.inventory.request.accepted: request_id, report_id, reason
@@ -126,7 +126,7 @@ TEST_F(LogEventsTest, DiagCollectFailedFields) {
          flog::f_str("someip_service_id", "0x1110"),
          flog::f_str("someip_method_id", "0x0002"),
          flog::f_int("duration_ms", 5000),
-         flog::f_str("error_code", "CGW-FOTA-1006")}
+         flog::f_str("error_code", "CCU-FOTA-1006")}
     );
 }
 
@@ -149,7 +149,7 @@ TEST_F(LogEventsTest, SnapshotAssembleFailedFields) {
         "Snapshot assembly failed",
         {flog::f_str("report_id", "1"),
          flog::f_int("snapshot_seq", 1),
-         flog::f_str("error_code", "CGW-FOTA-1003")}
+         flog::f_str("error_code", "CCU-FOTA-1003")}
     );
 }
 
@@ -175,7 +175,7 @@ TEST_F(LogEventsTest, TboxSubmitFailedFields) {
          flog::f_str("someip_method_id", "0x0001"),
          flog::f_int("attempt", 3),
          flog::f_int("duration_ms", 5000),
-         flog::f_str("error_code", "CGW-FOTA-1005")}
+         flog::f_str("error_code", "CCU-FOTA-1005")}
     );
 }
 
@@ -193,28 +193,28 @@ TEST_F(LogEventsTest, InventoryReportCompletedFields) {
 }
 
 // ============================================================
-// 敏感类型验证（CGW-FOTA-DSN-CR-003 §字段与脱敏）
+// 敏感类型验证（CCU-FOTA-DSN-CR-003 §字段与脱敏）
 // ============================================================
 TEST_F(LogEventsTest, SensitivityClassification) {
     // FOTA 专用字段应为 Normal
-    EXPECT_EQ(cgw::fw::log::Sensitivity::Normal, cgw::fw::log::Sensitivity::Normal);
+    EXPECT_EQ(ccu::fw::log::Sensitivity::Normal, ccu::fw::log::Sensitivity::Normal);
 
     // VIN/device_sn 应按 Identifier 处理
     FotaLogAdapter::inventory_reporter().info("test.event",
         "VIN as Identifier",
-        {flog::f_str("vin", "LSVAU2180N2123456", cgw::fw::log::Sensitivity::Identifier)}
+        {flog::f_str("vin", "LSVAU2180N2123456", ccu::fw::log::Sensitivity::Identifier)}
     );
 
     // 快照 payload 应按 Payload 处理
     FotaLogAdapter::snapshot_assembler().info("test.event",
         "Snapshot as Payload",
-        {flog::f_str("ecu_list", "raw_payload_data", cgw::fw::log::Sensitivity::Payload)}
+        {flog::f_str("ecu_list", "raw_payload_data", ccu::fw::log::Sensitivity::Payload)}
     );
 
     // 密钥材料应按 Secret 处理（直接拒绝）
     FotaLogAdapter::diag_client().info("test.event",
         "Secret field rejection",
-        {flog::f_str("session_key", "secret_key_data", cgw::fw::log::Sensitivity::Secret)}
+        {flog::f_str("session_key", "secret_key_data", ccu::fw::log::Sensitivity::Secret)}
     );
 }
 
@@ -245,4 +245,4 @@ TEST_F(LogEventsTest, EnumToStringConversions) {
 }
 
 } // namespace
-} // namespace cgw_fota
+} // namespace ccu_fota

@@ -1,10 +1,10 @@
 // =============================================================================
 // src/someip/diag_inventory_client.cpp
-// CGW-FOTA DIAG Inventory Client 适配器实现 (CGW-FOTA-DSN-CR-007 §Client 设计)
+// CCU-FOTA DIAG Inventory Client 适配器实现 (CCU-FOTA-DSN-CR-007 §Client 设计)
 // =============================================================================
 
-#include "cgw/fota/someip/diag_inventory_client.hpp"
-#include "cgw/fota/someip/error_mapper.hpp"
+#include "ccu/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fota/someip/error_mapper.hpp"
 #include "constants.h"
 #include "error_codes.h"
 #include "fota_log_adapter.h"
@@ -14,15 +14,15 @@
 #include <string>
 #include <vector>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace someip {
 
-using cgw::fw::someip::Availability;
-using cgw::fw::someip::CallOptions;
-using cgw::fw::someip::CallResult;
-using cgw::fw::someip::Payload;
-using cgw::fw::someip::PayloadView;
-using cgw::fw::someip::RetryMode;
+using ccu::fw::someip::Availability;
+using ccu::fw::someip::CallOptions;
+using ccu::fw::someip::CallResult;
+using ccu::fw::someip::Payload;
+using ccu::fw::someip::PayloadView;
+using ccu::fw::someip::RetryMode;
 
 namespace {
 
@@ -32,7 +32,7 @@ namespace {
 
 } // namespace
 
-DiagInventoryClient::DiagInventoryClient(cgw::fw::someip::Client client,
+DiagInventoryClient::DiagInventoryClient(ccu::fw::someip::Client client,
                                          std::chrono::milliseconds collectTimeout)
     : client_(std::move(client))
     , collectTimeout_(collectTimeout)
@@ -48,8 +48,8 @@ void DiagInventoryClient::requestService() { client_.requestService(); }
 void DiagInventoryClient::releaseService() { client_.releaseService(); }
 Availability DiagInventoryClient::availability() const { return client_.availability(); }
 
-cgw::fw::someip::Subscription
-DiagInventoryClient::onAvailability(cgw::fw::someip::AvailabilityCallback callback) {
+ccu::fw::someip::Subscription
+DiagInventoryClient::onAvailability(ccu::fw::someip::AvailabilityCallback callback) {
     return client_.onAvailability(std::move(callback));
 }
 
@@ -148,4 +148,4 @@ bool DiagInventoryClient::collectVehicleInventory(VehicleSoftwareSnapshot& snaps
 }
 
 } // namespace someip
-} // namespace cgw_fota
+} // namespace ccu_fota

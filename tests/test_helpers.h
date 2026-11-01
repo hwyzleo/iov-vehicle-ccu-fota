@@ -1,12 +1,12 @@
 #pragma once
 
-#include "cgw/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fota/someip/diag_inventory_client.hpp"
 #include "data_models.h"
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace test {
 
-// CGW-FOTA-DSN-CR-007: 测试子类继承 framework-backed 适配器，override 业务方法
+// CCU-FOTA-DSN-CR-007: 测试子类继承 framework-backed 适配器，override 业务方法
 // 以避免真实 SOME/IP 调用（适配器的 protected 默认构造不持有 framework Client）。
 
 // Testable DIAG 采集 Client：override collectVehicleInventory 直接返回测试快照。
@@ -50,4 +50,4 @@ private:
 };
 
 } // namespace test
-} // namespace cgw_fota
+} // namespace ccu_fota

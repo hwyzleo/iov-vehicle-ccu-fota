@@ -1,6 +1,6 @@
 // =============================================================================
 // tests/ota/daemon_assembly_test.cpp
-// CGW-FOTA 契约 B daemon 级装配测试 (CGW-FOTA-DSN-CR-010/011 测试矩阵)
+// CCU-FOTA 契约 B daemon 级装配测试 (CCU-FOTA-DSN-CR-010/011 测试矩阵)
 // =============================================================================
 // 证明 main.cpp 使用的同一装配路径（FotaDaemon::create + start）在真实
 // SomeIpRuntime（FakeSomeIpBackend）+ 真实 SomeIpVehicleMessageTransport 上
@@ -12,16 +12,16 @@
 //   * graceful shutdown 后传输拒绝新调用（Stopping）。
 // =============================================================================
 
-#include "cgw/fota/daemon/fota_daemon.hpp"
-#include "cgw/fota/ota/mock/mock_ports.hpp"
-#include "cgw/fota/ota/payload_types.hpp"
-#include "cgw/fota/someip/tbox_generic_transport_contract.hpp"
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
-#include "cgw/fota/store/fota_state_store.hpp"
-#include "cgw/fota/store/fota_state_migration.hpp"
+#include "ccu/fota/daemon/fota_daemon.hpp"
+#include "ccu/fota/ota/mock/mock_ports.hpp"
+#include "ccu/fota/ota/payload_types.hpp"
+#include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_migration.hpp"
 
-#include "cgw/fw/someip/runtime.hpp"
-#include "cgw/fw/someip/types.hpp"
+#include "ccu/fw/someip/runtime.hpp"
+#include "ccu/fw/someip/types.hpp"
 #include "constants.h"
 
 #include <gtest/gtest.h>
@@ -32,12 +32,12 @@
 #include <memory>
 #include <thread>
 
-using namespace cgw_fota;
-using namespace cgw_fota::ota;
-using namespace cgw_fota::ota::mock;
-using namespace cgw_fota::store;
-using namespace cgw_fota::store::fota;
-namespace someip_fw = cgw::fw::someip;
+using namespace ccu_fota;
+using namespace ccu_fota::ota;
+using namespace ccu_fota::ota::mock;
+using namespace ccu_fota::store;
+using namespace ccu_fota::store::fota;
+namespace someip_fw = ccu::fw::someip;
 
 namespace {
 
@@ -52,7 +52,7 @@ std::int64_t nowMs() {
 
 someip_fw::SomeIpConfig makeDaemonTestConfig() {
     someip_fw::SomeIpConfig c;
-    c.application = "cgw-fota-daemon-test";
+    c.application = "ccu-fota-daemon-test";
     c.routingMode = someip_fw::RoutingMode::External;
     c.maxPayloadBytes = 1024 * 1024;
     c.maxInflightCalls = 64;
@@ -68,7 +68,7 @@ someip_fw::SomeIpConfig makeDaemonTestConfig() {
     c.maxClients = 8;
     c.maxSubscriptionsPerClient = 16;
     c.maxRetryTimers = 64;
-    c.registryProfile = "cgw-fota-test";
+    c.registryProfile = "ccu-fota-test";
     return c;
 }
 
@@ -169,8 +169,8 @@ TEST(DaemonAssembly, MainWiringCreatesAndHoldsContractB) {
     fotaCfg.genericTransport.eventId = kGenericEvent;
     fotaCfg.genericTransport.eventgroupId = kGenericGroup;
     fotaCfg.genericTransport.interfaceMajor = 1;
-    cgw_fota::someip::TboxGenericTransportAddress addr;
-    ASSERT_TRUE(cgw_fota::someip::resolveTboxGenericTransport(fotaCfg, addr));
+    ccu_fota::someip::TboxGenericTransportAddress addr;
+    ASSERT_TRUE(ccu_fota::someip::resolveTboxGenericTransport(fotaCfg, addr));
     ASSERT_TRUE(addr.fullyAllocated());
 
     // ---- 4. 端口（Mock 端口；daemon 装配路径与 main.cpp 一致）----

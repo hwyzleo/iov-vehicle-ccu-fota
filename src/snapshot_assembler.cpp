@@ -1,12 +1,12 @@
 #include "snapshot_assembler.h"
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 #include "error_codes.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
 #include "constants.h"
 #include <chrono>
 
-namespace cgw_fota {
+namespace ccu_fota {
 
 SnapshotAssembler::SnapshotAssembler(std::shared_ptr<someip::DiagInventoryClient> client)
     : client_(client)
@@ -37,8 +37,8 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
         hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)
     );
 
-    // Collect vehicle inventory from CGW-DIAG (VIN comes from DIAG)
-    // CGW-FOTA-DSN-CR-007: framework retry=None；业务重试由 orchestrator 执行。
+    // Collect vehicle inventory from CCU-DIAG (VIN comes from DIAG)
+    // CCU-FOTA-DSN-CR-007: framework retry=None；业务重试由 orchestrator 执行。
     // 每次重试产生新 framework request/session，保持同一 trace/report 上下文。
     bool collected = false;
     uint32_t max_attempts = use_diag_retry_ ? (diag_retry_max_attempts_ + 1) : 1;
@@ -68,7 +68,7 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
              flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
              flog::f_str("someip_method_id", hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)),
              flog::f_int("duration_ms", duration_ms),
-             flog::f_str("error_code", "CGW-FOTA-1006")}
+             flog::f_str("error_code", "CCU-FOTA-1006")}
         );
         return false;
     }
@@ -90,16 +90,16 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
             fota_events::SNAPSHOT_ASSEMBLE_FAILED,
             "Snapshot validation failed",
             {flog::f_str("report_id", current_report_id()),
-             flog::f_str("error_code", "CGW-FOTA-1003")}
+             flog::f_str("error_code", "CCU-FOTA-1003")}
         );
         return false;
     }
 
-    // Update sequence number: durable allocation if store present (CGW-FOTA-DSN-CR-005)
+    // Update sequence number: durable allocation if store present (CCU-FOTA-DSN-CR-005)
     if (state_store_) {
         try {
             snapshot.snapshot_seq = state_store_->allocateSnapshotSeq();
-        } catch (const cgw_fota::store::SeqAllocBlocked&) {
+        } catch (const ccu_fota::store::SeqAllocBlocked&) {
             FotaLogAdapter::snapshot_assembler().error(
                 fota_events::SNAPSHOT_ASSEMBLE_FAILED,
                 "Snapshot assembly blocked: sequence allocation failed",
@@ -178,4 +178,4 @@ bool SnapshotAssembler::validateSnapshot(const VehicleSoftwareSnapshot& snapshot
     return true;
 }
 
-} // namespace cgw_fota
+} // namespace ccu_fota

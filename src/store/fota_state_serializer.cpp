@@ -1,16 +1,16 @@
 // =============================================================================
 // src/store/fota_state_serializer.cpp
-// CGW-FOTA 状态序列化器实现 (CGW-FOTA-DSN-CR-005)
+// CCU-FOTA 状态序列化器实现 (CCU-FOTA-DSN-CR-005)
 // =============================================================================
 
-#include "cgw/fota/store/fota_state_serializer.hpp"
+#include "ccu/fota/store/fota_state_serializer.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstring>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace store {
 
 using json = nlohmann::json;
@@ -155,7 +155,7 @@ CollectionStatus overallResultFromString(const std::string& r) {
 }
 
 // ---------------------------------------------------------------------------
-// PersistedFingerprints JSON 转换与校验 (CGW-FOTA-DSN-CR-006 §10.6)
+// PersistedFingerprints JSON 转换与校验 (CCU-FOTA-DSN-CR-006 §10.6)
 // 比较前必须先校验 algorithm 与 canonicalization；空 fingerprints 视为
 // 未知/遗留，允许（不可比较）。
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ std::string migrateLastSuccessPayload(const std::string& payloadJson,
         if (!j.contains("schemaVersion")) j["schemaVersion"] = static_cast<std::uint32_t>(1);
         if (!j.contains("fingerprint"))   j["fingerprint"] = "";
     } else if (fromVersion == 1) {
-        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 弃用旧 fingerprint 占位串，新增 fingerprints{}
+        // v1 -> v2 (CCU-FOTA-DSN-CR-006): 弃用旧 fingerprint 占位串，新增 fingerprints{}
         // （未知/不兼容，触发首次完整采集建立 v1 指纹）。
         j.erase("fingerprint");
         if (!j.contains("fingerprints")) {
@@ -439,7 +439,7 @@ std::string migrateDedupePayload(const std::string& payloadJson,
         }
         if (!j.contains("ttlMs")) j["ttlMs"] = 0;
     } else if (fromVersion == 1) {
-        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 每个条目弃用 fingerprint，新增 fingerprints{}。
+        // v1 -> v2 (CCU-FOTA-DSN-CR-006): 每个条目弃用 fingerprint，新增 fingerprints{}。
         if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::DEDUPE_VERSION;
         if (j.contains("entries") && j["entries"].is_array()) {
             for (auto& ej : j["entries"]) {
@@ -517,7 +517,7 @@ std::string migrateActiveJobPayload(const std::string& payloadJson,
         if (!j.contains("schemaVersion")) j["schemaVersion"] = static_cast<std::uint32_t>(1);
         if (!j.contains("idempotencyKey")) j["idempotencyKey"] = "";
     } else if (fromVersion == 1) {
-        // v1 -> v2 (CGW-FOTA-DSN-CR-006): 新增 fingerprints{}（未知）。
+        // v1 -> v2 (CCU-FOTA-DSN-CR-006): 新增 fingerprints{}（未知）。
         if (!j.contains("schemaVersion")) j["schemaVersion"] = schema::ACTIVE_JOB_VERSION;
         if (!j.contains("fingerprints")) {
             j["fingerprints"] = json{{"algorithm", ""},
@@ -580,4 +580,4 @@ ActiveJobState decodeActiveJob(const std::string& bytes) {
 }
 
 } // namespace store
-} // namespace cgw_fota
+} // namespace ccu_fota

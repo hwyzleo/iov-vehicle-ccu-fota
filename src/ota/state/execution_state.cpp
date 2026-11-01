@@ -1,13 +1,13 @@
 // =============================================================================
 // src/ota/state/execution_state.cpp
-// CGW-FOTA Execution 状态机实现 (CGW-FOTA-DSN-CR-009 §13.2)
+// CCU-FOTA Execution 状态机实现 (CCU-FOTA-DSN-CR-009 §13.2)
 // =============================================================================
 
-#include "cgw/fota/ota/state/execution_state.hpp"
+#include "ccu/fota/ota/state/execution_state.hpp"
 
 #include <cstring>
 
-namespace cgw_fota {
+namespace ccu_fota {
 namespace ota {
 
 bool isValidExecutionTransition(ExecutionState from, ExecutionState to) {
@@ -88,4 +88,4 @@ bool executionStateFromString(const char* s, ExecutionState& out) {
 }
 
 } // namespace ota
-} // namespace cgw_fota
+} // namespace ccu_fota

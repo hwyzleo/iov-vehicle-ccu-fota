@@ -5,7 +5,7 @@
 #include <optional>
 #include <cstdint>
 
-namespace cgw_fota {
+namespace ccu_fota {
 
 enum class VersionSource {
     UDS_0x22,
@@ -38,7 +38,7 @@ enum class VinSource {
     UNKNOWN
 };
 
-// 枚举转字符串（用于日志输出，CGW-FOTA-DSN-CR-003）
+// 枚举转字符串（用于日志输出，CCU-FOTA-DSN-CR-003）
 inline const char* versionSourceToString(VersionSource s) {
     switch (s) {
         case VersionSource::UDS_0x22:           return "UDS_0x22";
@@ -104,4 +104,4 @@ struct VehicleSoftwareSnapshot {
     std::vector<EcuVersionEntry> ecu_list;
 };
 
-} // namespace cgw_fota
+} // namespace ccu_fota

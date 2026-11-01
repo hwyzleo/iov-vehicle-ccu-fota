@@ -1,4 +1,4 @@
-# CGW-FOTA-DSN-CR-002 Implementation Progress
+# CCU-FOTA-DSN-CR-002 Implementation Progress
 
 **BASE_SHA:** 9cf32d8d811047b30f24e7f67c024dee91773f8e
 

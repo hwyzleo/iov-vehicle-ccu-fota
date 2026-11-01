@@ -1,20 +1,20 @@
 // =============================================================================
 // tests/test_inventory_fingerprint.cpp
-// CGW-FOTA 业务摘要单元测试 (CGW-FOTA-DSN-CR-006 §10.1-10.5 / §测试设计)
+// CCU-FOTA 业务摘要单元测试 (CCU-FOTA-DSN-CR-006 §10.1-10.5 / §测试设计)
 // 覆盖：golden digest（与独立 Python 参考实现互校）、ECU 排序扰动、字段参与/排除、
 //       snapshot 稳定性、identifierDigest 域隔离与归一化、dedupeKey、重复稳定键
 //       fail-closed、指纹格式。
 // =============================================================================
 
-#include "cgw/fota/fingerprint/inventory_fingerprint.hpp"
-#include "cgw/fota/fingerprint/canonical_encoder.hpp"
+#include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
+#include "ccu/fota/fingerprint/canonical_encoder.hpp"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-using namespace cgw_fota;
-using namespace cgw_fota::fingerprint;
+using namespace ccu_fota;
+using namespace ccu_fota::fingerprint;
 
 namespace {
 

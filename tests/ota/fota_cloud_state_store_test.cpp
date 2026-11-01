@@ -1,12 +1,12 @@
 // =============================================================================
 // tests/ota/fota_cloud_state_store_test.cpp
-// CGW-FOTA 车云 FOTA 状态存储单元测试 (CGW-FOTA-DSN-CR-011 §Store)
+// CCU-FOTA 车云 FOTA 状态存储单元测试 (CCU-FOTA-DSN-CR-011 §Store)
 // 覆盖：各记录 round-trip、删除、per-item key、proto-hex 辅助、未知新版本 fail-closed。
 // =============================================================================
 
-#include "cgw/fota/store/fota_cloud_state_serializer.hpp"
-#include "cgw/fota/store/fota_cloud_state_store.hpp"
-#include "cgw/fota/store/fota_state_store.hpp"
+#include "ccu/fota/store/fota_cloud_state_serializer.hpp"
+#include "ccu/fota/store/fota_cloud_state_store.hpp"
+#include "ccu/fota/store/fota_state_store.hpp"
 
 #include "vehicle/fota/v1/task.pb.h"
 
@@ -18,8 +18,8 @@
 #include <string>
 
 namespace fs = std::filesystem;
-using namespace cgw_fota::store;
-using namespace cgw_fota::store::fota;
+using namespace ccu_fota::store;
+using namespace ccu_fota::store::fota;
 
 namespace {
 fs::path makeUniqueRoot() {

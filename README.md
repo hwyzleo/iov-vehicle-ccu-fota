@@ -1,18 +1,18 @@
-# CGW-FOTA Service
+# CCU-FOTA Service
 
-CGW-FOTA (Gateway Firmware Over-The-Air) service for vehicle software version snapshot collection and reporting.
+CCU-FOTA (Central Computing Unit Firmware Over-The-Air) service for vehicle software version snapshot collection and reporting.
 
 ## Overview
 
-CGW-FOTA is responsible for:
-- Collecting vehicle software version snapshots from CGW-DIAG
+CCU-FOTA is responsible for:
+- Collecting vehicle software version snapshots from CCU-DIAG
 - Assembling structured software inventory reports
 - Synchronizing FOTA task state with the cloud via SOME/IP generic transport
 
 ## Architecture
 
 The service consists of two main components:
-1. **SnapshotAssembler**: Consumes version list from CGW-DIAG and assembles vehicle snapshot
+1. **SnapshotAssembler**: Consumes version list from CCU-DIAG and assembles vehicle snapshot
 2. **FotaOrchestrator**: Drives the cloud FOTA task lifecycle over the SOME/IP generic transport
 
 ## Building
@@ -45,9 +45,9 @@ Examples:
 ./scripts/build.sh --clean          # Clean and rebuild
 ```
 
-> CGW-FOTA-DSN-CR-008: 正式 install/部署由 CGW-BUILD release-set 编排，
+> CCU-FOTA-DSN-CR-008: 正式 install/部署由 CCU-BUILD release-set 编排，
 > 开发脚本不再提供 `--install` 旁路。本地 DESTDIR staging 验证：
-> `DESTDIR=/tmp/fota-root cmake --install build --prefix /usr --component cgw-fota-runtime`
+> `DESTDIR=/tmp/fota-root cmake --install build --prefix /usr --component ccu-fota-runtime`
 
 ### Manual Build Instructions
 
@@ -64,14 +64,14 @@ make
 
 ```bash
 cd build
-./CgwFotaTests
+./CcuFotaTests
 ```
 
 ## Configuration
 
-CGW-FOTA 通过 **cgw-framework-config** 获取不可变配置快照（CGW-FOTA-DSN-CR-004）。启动时执行 `Config::load("fota", options)` 六阶段解析与 ordered-overlay，再经 `FotaConfig::from(snapshot)` 完成类型/范围/跨字段校验；任一失败均 fail-closed 终止。业务代码不直接接触 yaml-cpp。
+CCU-FOTA 通过 **ccu-framework-config** 获取不可变配置快照（CCU-FOTA-DSN-CR-004）。启动时执行 `Config::load("fota", options)` 六阶段解析与 ordered-overlay，再经 `FotaConfig::from(snapshot)` 完成类型/范围/跨字段校验；任一失败均 fail-closed 终止。业务代码不直接接触 yaml-cpp。
 
-- 量产 `configRoots` 至少包含 `/etc/cgw`；正式 `/etc/cgw/conf.d/fota.yaml` 由 CGW-BUILD 从 `config/fota.default.yaml` 生成。
+- 量产 `configRoots` 至少包含 `/etc/ccu`；正式 `/etc/ccu/conf.d/fota.yaml` 由 CCU-BUILD 从 `config/fota.default.yaml` 生成。
 - `config/fota.yaml`、`config/common.yaml` 仅开发夹具，不进入正式 install component。
 - SOME/IP 寻址（Service/Instance/Method ID、协议、端口）不进入 fota.yaml，继续以整车 SOME/IP Service Registry 为唯一 SSOT。
 
@@ -105,11 +105,11 @@ fota:
 ### Running the Service
 
 ```bash
-# 量产：configRoots 默认 /etc/cgw
-./cgw-fota
+# 量产：configRoots 默认 /etc/ccu
+./ccu-fota
 
 # 开发/测试：指定含 common.yaml 的 config 根
-./cgw-fota config
+./ccu-fota config
 ```
 
 ### Stopping the Service
@@ -126,14 +126,14 @@ Press `Ctrl+C` to stop the service gracefully.
 
 ## Error Codes
 
-- CGW-FOTA-1003: 清单组装失败
-- CGW-FOTA-1004: 车内发送失败
-- CGW-FOTA-1005: TBOX 不可达
-- CGW-FOTA-1006: 上报超时
+- CCU-FOTA-1003: 清单组装失败
+- CCU-FOTA-1004: 车内发送失败
+- CCU-FOTA-1005: TBOX 不可达
+- CCU-FOTA-1006: 上报超时
 
 ## Dependencies
 
-- CGW-DIAG: Version collection interface (`collectVehicleInventory()`)
+- CCU-DIAG: Version collection interface (`collectVehicleInventory()`)
 - TBOX-MQTT: Uplink channel with `fota` business topic routing
 - VMD: Provides VIN
 

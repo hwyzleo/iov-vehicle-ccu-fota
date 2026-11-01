@@ -71,7 +71,7 @@ trap cleanup EXIT INT TERM
 check_dependencies() {
     print_info "Checking dependencies..."
     
-    if [ ! -f "${BUILD_DIR}/cgw-fota" ]; then
+    if [ ! -f "${BUILD_DIR}/ccu-fota" ]; then
         print_error "FOTA executable not found. Please build first: ./scripts/build.sh"
         exit 1
     fi
@@ -123,9 +123,9 @@ start_mock_diag() {
 start_fota() {
     print_info "Starting FOTA Service..."
     
-    # CGW-FOTA-DSN-CR-004: cgw-fota 接入 cgw-framework-config，argv[1] 为 config 根
+    # CCU-FOTA-DSN-CR-004: ccu-fota 接入 ccu-framework-config，argv[1] 为 config 根
     # （需含 common.yaml）；传入仓库 config/ 开发夹具根。
-    "${BUILD_DIR}/cgw-fota" "${PROJECT_ROOT}/config" > "$FOTA_LOG" 2>&1 &
+    "${BUILD_DIR}/ccu-fota" "${PROJECT_ROOT}/config" > "$FOTA_LOG" 2>&1 &
     FOTA_PID=$!
     
     # 等待服务启动并完成初始报告

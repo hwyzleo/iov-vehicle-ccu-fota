@@ -1,36 +1,36 @@
-# CGW-FOTA Architecture
+# CCU-FOTA Architecture
 
 ## System Overview
 
-CGW-FOTA is a vehicle software version management service that collects and reports software inventory from ECUs to the cloud via TBOX.
+CCU-FOTA is a vehicle software version management service that collects and reports software inventory from ECUs to the cloud via TBOX.
 
 ## Data Flow
 
 ```
-各 ECU →(UDS/SOME-IP)→ CGW-DIAG →(SOME/IP)→ CGW-FOTA →(SOME/IP)→ TBOX →(MQTT)→ 云端
+各 ECU →(UDS/SOME-IP)→ CCU-DIAG →(SOME/IP)→ CCU-FOTA →(SOME/IP)→ TBOX →(MQTT)→ 云端
 ```
 
 ## Components
 
 ### SnapshotAssembler
 
-**Responsibility**: Consumes version list from CGW-DIAG and assembles vehicle software snapshot.
+**Responsibility**: Consumes version list from CCU-DIAG and assembles vehicle software snapshot.
 
 **Key Features**:
-- Calls `collectVehicleInventory()` from CGW-DIAG
+- Calls `collectVehicleInventory()` from CCU-DIAG
 - Manages snapshot sequence numbers
 - Implements reporting throttling
 - Validates snapshot integrity
 
 **Dependencies**:
-- `SomeIpFotaClient`: For CGW-DIAG communication
+- `SomeIpFotaClient`: For CCU-DIAG communication
 
 ### SomeIpFotaClient
 
-**Responsibility**: Manages SOME/IP communication with CGW-DIAG.
+**Responsibility**: Manages SOME/IP communication with CCU-DIAG.
 
 **Key Features**:
-- Connects to CGW-DIAG service
+- Connects to CCU-DIAG service
 - Provides `collectVehicleInventory()` interface
 - Provides `getEcuVersion()` interface
 - Provides `getRegistryVersion()` interface
@@ -96,10 +96,10 @@ fota:
 
 ### Error Codes
 
-- CGW-FOTA-1003: 清单组装失败
-- CGW-FOTA-1004: 车内发送失败
-- CGW-FOTA-1005: TBOX 不可达
-- CGW-FOTA-1006: 上报超时
+- CCU-FOTA-1003: 清单组装失败
+- CCU-FOTA-1004: 车内发送失败
+- CCU-FOTA-1005: TBOX 不可达
+- CCU-FOTA-1006: 上报超时
 
 ### Retry Mechanism
 
@@ -111,7 +111,7 @@ The service implements configurable retry mechanism for TBOX communication:
 ## Threading Model
 
 - Main thread: Handles event loop and coordination
-- SOME/IP client threads: Handle communication with CGW-DIAG and TBOX
+- SOME/IP client threads: Handle communication with CCU-DIAG and TBOX
 - Configuration thread: Handles hot-reload of configuration (future)
 
 ## Security Considerations
