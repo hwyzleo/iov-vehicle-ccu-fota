@@ -51,6 +51,10 @@ struct CloudConfig {
     std::uint32_t eventBatchMax = 64;
     std::chrono::milliseconds controlAckTimeout{5000};
     std::chrono::milliseconds cloudCallTimeout{10000};
+    // 时钟门禁 (上行 Envelope 的 timestamp_ms/expire_at_ms 依赖可信 CLOCK_REALTIME)
+    bool requireClockSync = true;
+    std::chrono::milliseconds clockSyncPollInterval{1000};
+    std::int64_t clockMinValidEpochMs = 1735689600000LL;  // 2025-01-01T00:00:00Z
 };
 
 // ---------------------------------------------------------------------------

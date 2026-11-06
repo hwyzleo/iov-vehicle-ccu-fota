@@ -22,6 +22,7 @@
 #include "ccu/fota/ota/call_context.hpp"
 #include "ccu/fota/ota/event_sink.hpp"
 #include "ccu/fota/ota/fota_cloud_proxy.hpp"
+#include "ccu/fota/ota/ports/clock_sync_provider.hpp"
 #include "ccu/fota/ota/ports/consent_provider.hpp"
 #include "ccu/fota/ota/ports/install_executor.hpp"
 #include "ccu/fota/ota/ports/inventory_provider.hpp"
@@ -50,6 +51,13 @@ struct FotaOrchestratorConfig {
     std::chrono::milliseconds taskCheckInterval{60000};
     bool reconcileOnStart = true;
     std::uint32_t eventOutboxMax = 4096;
+    // 时钟门禁：系统时钟与可信时间源同步前不推进任何上行动作（含启动期版本/清单
+    // 上报）。Envelope 的 timestamp_ms/expire_at_ms 由 CLOCK_REALTIME 推导，时钟
+    // 未同步时 expire_at_ms 落在过去，云侧网关按契约判定 MESSAGE_EXPIRED 丢入 DLQ。
+    bool requireClockSync = true;
+    // 等待时钟同步期间的轮询间隔。远小于 taskCheckInterval，使同步完成后立即上报，
+    // 不必等满一个任务检测周期。
+    std::chrono::milliseconds clockSyncPollInterval{1000};
 };
 
 struct StepOutcome {
@@ -59,6 +67,9 @@ struct StepOutcome {
     std::string action;     // 本次动作描述（checkTask/download/...）
     std::string error;      // 非空表示本次失败（含 transport cause）
     bool transportFailed = false;
+    // true 表示本次未推进的唯一原因是系统时钟未同步（未发出任何上行）。
+    // 调用方据此以 clockSyncPollInterval 而非 taskCheckInterval 重试。
+    bool awaitingClockSync = false;
 };
 
 // 控制应用结果（来自 InstallExecutor.apply）。
@@ -70,11 +81,15 @@ struct ControlOutcome {
 
 class FotaOrchestrator : public EventSink {
 public:
+    // clockSync 为时钟就绪判定来源。传 nullptr 表示不启用时钟门禁（纯状态机单测
+    // 用法）；生产装配必须注入，由 FotaDaemon::create 在 requireClockSync=true
+    // 时强制校验。
     FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv,
                      ConsentProvider& consent, PackageDownloader& dl,
                      VehicleConditionProvider& cond, InstallExecutor& exec,
                      LogCollector& log, store::fota::FotaCloudStateStore& store,
-                     FotaOrchestratorConfig cfg);
+                     FotaOrchestratorConfig cfg,
+                     ClockSyncProvider* clockSync = nullptr);
 
     // 启动对账恢复：从 durable 状态恢复 VehicleTask/Execution/outbox 水位。
     void reconcileOnStart();
@@ -108,6 +123,7 @@ private:
     LogCollector& log_;
     store::fota::FotaCloudStateStore& store_;
     FotaOrchestratorConfig cfg_;
+    ClockSyncProvider* clockSync_ = nullptr;  // 可为空 = 不启用时钟门禁
 
     VehicleTaskState vtState_ = VehicleTaskState::None;
     ExecutionState exState_ = ExecutionState::PermitPersisted;
@@ -126,6 +142,9 @@ private:
 
     CallContext makeCtx(const std::string& idempotencyKey) const;
     std::int64_t nowMs() const;
+
+    // 时钟门禁：未就绪时填充 outcome（action=awaitClockSync）并返回 false。
+    bool clockReady(StepOutcome& outcome);
 
     // 阶段动作
     StepOutcome doCheckTask();

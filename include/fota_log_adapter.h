@@ -42,6 +42,9 @@ constexpr const char* STORE_RECOVERY_COMPLETED   = "fota.store.recovery.complete
 constexpr const char* STORE_RECOVERY_BLOCKED     = "fota.store.recovery.blocked";
 constexpr const char* STORE_SEQ_ALLOCATED        = "fota.store.seq.allocated";
 constexpr const char* STORE_SEQ_BLOCKED          = "fota.store.seq.blocked";
+// Cloud uplink gating（时钟门禁：上行绝对时间字段依赖可信系统时钟）
+constexpr const char* CLOUD_CLOCK_SYNC_PENDING   = "fota.cloud.clock_sync.pending";
+constexpr const char* CLOUD_CLOCK_SYNC_READY     = "fota.cloud.clock_sync.ready";
 } // namespace fota_events
 
 // ============================================================

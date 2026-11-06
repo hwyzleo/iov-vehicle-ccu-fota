@@ -197,7 +197,9 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     rejectUnknown(s, "fota.cloud",
                   {"enabled", "protocol_version", "task_check_interval_ms",
                    "reconcile_on_start", "event_outbox_max", "event_batch_max",
-                   "control_ack_timeout_ms", "cloud_call_timeout_ms"});
+                   "control_ack_timeout_ms", "cloud_call_timeout_ms",
+                   "require_clock_sync", "clock_sync_poll_interval_ms",
+                   "clock_min_valid_epoch_ms"});
     c.cloud.enabled = s.getOr<bool>("fota.cloud.enabled", true);
     c.cloud.protocolVersion =
         s.getOr<std::string>("fota.cloud.protocol_version", "fota-v1");
@@ -222,6 +224,21 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
         s.getOr<std::int64_t>("fota.cloud.cloud_call_timeout_ms", 10000);
     requireRange("fota.cloud.cloud_call_timeout_ms", cloudCall, 1, INT64_MAX);
     c.cloud.cloudCallTimeout = std::chrono::milliseconds(cloudCall);
+
+    // 时钟门禁：上行 Envelope 的 timestamp_ms/expire_at_ms 由 CLOCK_REALTIME 推导，
+    // 时钟未同步时 expire_at_ms 落在过去 -> 云侧判定 MESSAGE_EXPIRED 并丢入 DLQ。
+    // 缺省要求同步后再上行；轮询间隔必须远小于 task_check_interval_ms。
+    c.cloud.requireClockSync = s.getOr<bool>("fota.cloud.require_clock_sync", true);
+    std::int64_t clockPoll =
+        s.getOr<std::int64_t>("fota.cloud.clock_sync_poll_interval_ms", 1000);
+    requireRange("fota.cloud.clock_sync_poll_interval_ms", clockPoll, 100, 60000);
+    c.cloud.clockSyncPollInterval = std::chrono::milliseconds(clockPoll);
+    std::int64_t clockFloor =
+        s.getOr<std::int64_t>("fota.cloud.clock_min_valid_epoch_ms", 1735689600000LL);
+    // 下限 2020-01-01T00:00:00Z：更早的值无法区分 RTC 回落，失去门禁意义。
+    requireRange("fota.cloud.clock_min_valid_epoch_ms", clockFloor,
+                 1577836800000LL, INT64_MAX);
+    c.cloud.clockMinValidEpochMs = clockFloor;
 
     // ---- mock.* (CCU-FOTA-DSN-CR-009 §构建与运行隔离) ----
     // 量产 preset 必须为 OFF；CI 扫描量产链接产物和配置。

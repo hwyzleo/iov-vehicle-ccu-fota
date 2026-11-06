@@ -197,6 +197,9 @@ TEST(DaemonAssembly, MainWiringCreatesAndHoldsContractB) {
     orchCfg.protocolVersion = "fota-v1";
     orchCfg.cloudCallTimeout = std::chrono::milliseconds(2000);
     orchCfg.taskCheckInterval = std::chrono::milliseconds(60000);  // 测试期不触发
+    // 本测试只验证装配/传输路径，不注入时钟判定来源；关闭时钟门禁以保持原语义
+    // （生产装配由 main.cpp 注入 SystemClockSyncProvider）。
+    orchCfg.requireClockSync = false;
 
     // ---- 5. 装配（main.cpp 同一路径）+ 启动 ----
     auto daemon = daemon::FotaDaemon::create(

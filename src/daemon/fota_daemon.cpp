@@ -6,13 +6,21 @@
 #include "ccu/fota/daemon/fota_daemon.hpp"
 
 #include "ccu/fota/ota/payload_types.hpp"
+#include "fota_log_adapter.h"
 
 #include "vehicle/fota/v1/types.pb.h"
+
+#include <stdexcept>
 
 namespace ccu_fota {
 namespace daemon {
 
 using namespace ccu_fota::ota;
+
+namespace {
+// 等待时钟同步期间的告警节流：首次立即告警，之后每 N 次轮询告警一次。
+constexpr std::uint64_t kClockWaitLogEveryPolls = 30;
+} // namespace
 
 FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
                        const ccu_fota::someip::TboxGenericTransportAddress& address,
@@ -25,7 +33,8 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
                        std::shared_ptr<VehicleConditionProvider> cond,
                        std::shared_ptr<InstallExecutor> exec,
                        std::shared_ptr<LogCollector> log,
-                       std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore)
+                       std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
+                       std::shared_ptr<ClockSyncProvider> clockSync)
     : runtime_(runtime)
     , transportCfg_(std::move(transportCfg))
     , orchCfg_(std::move(orchCfg))
@@ -36,9 +45,15 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
     , cond_(std::move(cond))
     , exec_(std::move(exec))
     , log_(std::move(log))
-    , cloudStore_(std::move(cloudStore)) {
+    , cloudStore_(std::move(cloudStore))
+    , clockSync_(std::move(clockSync)) {
     if (!inv_ || !consent_ || !dl_ || !cond_ || !exec_ || !log_ || !cloudStore_) {
         throw std::invalid_argument("FotaDaemon: ports/store must be non-null");
+    }
+    // fail-closed：要求时钟门禁但未注入判定来源时拒绝装配，不退化为"不检查"。
+    if (orchCfg_.requireClockSync && !clockSync_) {
+        throw std::invalid_argument(
+            "FotaDaemon: requireClockSync=true requires a ClockSyncProvider");
     }
     // 复用进程唯一 Runtime：只在其上 createClient（不创建第二个 Runtime/application）。
     ccu::fw::someip::ServiceKey key{address.service, address.instance};
@@ -50,7 +65,8 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
         std::move(client), address, transportCfg_);
     cloud_ = std::make_unique<FotaCloudProxyViaTransport>(*transport_);
     orch_ = std::make_unique<FotaOrchestrator>(
-        *cloud_, *inv_, *consent_, *dl_, *cond_, *exec_, *log_, *cloudStore_, orchCfg_);
+        *cloud_, *inv_, *consent_, *dl_, *cond_, *exec_, *log_, *cloudStore_, orchCfg_,
+        clockSync_.get());
 }
 
 FotaDaemon::~FotaDaemon() { stop(); }
@@ -67,11 +83,13 @@ std::unique_ptr<FotaDaemon> FotaDaemon::create(
     std::shared_ptr<VehicleConditionProvider> cond,
     std::shared_ptr<InstallExecutor> exec,
     std::shared_ptr<LogCollector> log,
-    std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore) {
+    std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
+    std::shared_ptr<ClockSyncProvider> clockSync) {
     return std::unique_ptr<FotaDaemon>(new FotaDaemon(
         runtime, address, std::move(transportCfg), std::move(orchCfg),
         businessTrigger, std::move(inv), std::move(consent), std::move(dl),
-        std::move(cond), std::move(exec), std::move(log), std::move(cloudStore)));
+        std::move(cond), std::move(exec), std::move(log), std::move(cloudStore),
+        std::move(clockSync)));
 }
 
 void FotaDaemon::start() {
@@ -96,8 +114,8 @@ void FotaDaemon::start() {
     // 3. reconcile / 恢复动作（durable 状态恢复）。
     if (orchCfg_.reconcileOnStart) orch_->reconcileOnStart();
 
-    // 4. 初始推进。
-    orch_->step();
+    // 4. 初始推进。时钟未同步时此次不发任何上行，由 timer 以较短间隔轮询直到同步。
+    observeStep(orch_->step());
 
     // 5. 开放业务触发（定时 step）。
     if (businessTrigger_) {
@@ -131,15 +149,41 @@ void FotaDaemon::stop() {
     running_.store(false);
 }
 
+void FotaDaemon::observeStep(const ota::StepOutcome& outcome) {
+    if (outcome.awaitingClockSync) {
+        const bool wasAwaiting = awaitingClockSync_.exchange(true);
+        const std::uint64_t polls = clockWaitPolls_++;
+        if (!wasAwaiting || (polls % kClockWaitLogEveryPolls) == 0) {
+            FotaLogAdapter::orchestrator().warn(
+                fota_events::CLOUD_CLOCK_SYNC_PENDING,
+                "System clock not synchronized, FOTA uplink withheld",
+                {flog::f_str("reason", outcome.error),
+                 flog::f_int("waited_polls", static_cast<std::int64_t>(polls))});
+        }
+        return;
+    }
+    if (awaitingClockSync_.exchange(false)) {
+        FotaLogAdapter::orchestrator().info(
+            fota_events::CLOUD_CLOCK_SYNC_READY,
+            "System clock synchronized, FOTA uplink resumed",
+            {flog::f_int("waited_polls", static_cast<std::int64_t>(clockWaitPolls_))});
+        clockWaitPolls_ = 0;
+    }
+}
+
 void FotaDaemon::timerLoop() {
-    const auto interval = orchCfg_.taskCheckInterval;
     std::unique_lock<std::mutex> lock(timerMutex_);
     while (!stopping_.load()) {
+        // 等待时钟同步期间用更短的轮询间隔，使同步完成后立刻上报，
+        // 不必等满一个 taskCheckInterval。
+        const auto interval = awaitingClockSync_.load()
+                                  ? orchCfg_.clockSyncPollInterval
+                                  : orchCfg_.taskCheckInterval;
         // 无锁等待，被 stop() 唤醒后退出。
         timerCv_.wait_for(lock, interval, [this] { return stopping_.load(); });
         if (stopping_.load()) break;
         lock.unlock();
-        orch_->step();   // 分步推进；失败保留 durable 状态，下次重试
+        observeStep(orch_->step());  // 分步推进；失败保留 durable 状态，下次重试
         lock.lock();
     }
 }

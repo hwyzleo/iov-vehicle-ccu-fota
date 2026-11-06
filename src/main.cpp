@@ -248,6 +248,15 @@ int main(int argc, char* argv[]) {
             auto prod_exec = std::make_shared<ccu_fota::ota::ConservativeInstallExecutor>();
             auto prod_log = std::make_shared<ccu_fota::ota::ConservativeLogCollector>();
 
+            // 时钟门禁判定来源：上行 Envelope 的 timestamp_ms/expire_at_ms 由
+            // CLOCK_REALTIME 推导，CCU 上电后 RTC 可能尚未与可信时间源同步，
+            // 此时 expire_at_ms 落在过去，云侧网关判定 MESSAGE_EXPIRED 并丢入上行
+            // DLQ。注入后，编排器在时钟同步前不发任何上行（含首次版本/清单上报）。
+            ccu_fota::ota::SystemClockSyncConfig clock_cfg;
+            clock_cfg.minValidEpochMs = fotaConfig.cloud.clockMinValidEpochMs;
+            auto prod_clock =
+                std::make_shared<ccu_fota::ota::SystemClockSyncProvider>(clock_cfg);
+
             ccu_fota::ota::FotaOrchestratorConfig orch_cfg;
             orch_cfg.protocolVersion = fotaConfig.cloud.protocolVersion;
             orch_cfg.deviceId = "ccu-fota";
@@ -255,6 +264,8 @@ int main(int argc, char* argv[]) {
             orch_cfg.cloudCallTimeout = fotaConfig.cloud.cloudCallTimeout;
             orch_cfg.eventOutboxMax = fotaConfig.cloud.eventOutboxMax;
             orch_cfg.taskCheckInterval = fotaConfig.cloud.taskCheckInterval;
+            orch_cfg.requireClockSync = fotaConfig.cloud.requireClockSync;
+            orch_cfg.clockSyncPollInterval = fotaConfig.cloud.clockSyncPollInterval;
 
             fota_daemon = ccu_fota::daemon::FotaDaemon::create(
                 runtime, tbox_generic_addr, fotaConfig.transport, orch_cfg,
@@ -262,7 +273,7 @@ int main(int argc, char* argv[]) {
                 std::move(prod_inv), std::move(prod_consent),
                 std::move(prod_dl), std::move(prod_cond),
                 std::move(prod_exec), std::move(prod_log),
-                cloud_state_store);
+                cloud_state_store, std::move(prod_clock));
             fota_daemon->start();  // transport -> 下行订阅 -> reconcile -> 触发
 
             FotaLogAdapter::orchestrator().info(

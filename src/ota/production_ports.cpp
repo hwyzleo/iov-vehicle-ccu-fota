@@ -11,7 +11,13 @@
 #include "ccu/fw/hash/sha256.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <sstream>
+#include <system_error>
+
+#if defined(__linux__)
+#include <sys/timex.h>
+#endif
 
 namespace ccu_fota {
 namespace ota {
@@ -161,6 +167,62 @@ LogPackage ConservativeLogCollector::collect(const LogCollectScope&) {
     p.generated = false;
     p.errorCode = "FOTA-LOG-COLLECT";
     return p;
+}
+
+// ---------------------------------------------------------------------------
+// SystemClockSyncProvider - 只读判定系统时钟是否可用于协议绝对时间字段。
+// ---------------------------------------------------------------------------
+SystemClockSyncProvider::SystemClockSyncProvider(SystemClockSyncConfig cfg)
+    : cfg_(cfg) {}
+
+ClockSyncStatus SystemClockSyncProvider::status() {
+    ClockSyncStatus st;
+    st.systemTimeMs = nowMs();
+
+    if (ready_.load(std::memory_order_acquire)) {
+        st.synchronized = true;
+        st.detail = "latched";
+        return st;
+    }
+
+    // 1. 合理性下限：RTC 未设置/掉电回落 -> 绝对时间字段不可用。
+    if (st.systemTimeMs < cfg_.minValidEpochMs) {
+        st.detail = "system time below min_valid_epoch (RTC unset or reset)";
+        return st;
+    }
+
+    // 2. 可信同步证据。
+    const char* evidence = nullptr;
+    if (cfg_.syncMarkerPath != nullptr && cfg_.syncMarkerPath[0] != '\0') {
+        std::error_code ec;
+        if (std::filesystem::exists(cfg_.syncMarkerPath, ec) && !ec) {
+            evidence = "time-sync marker present";
+        }
+    }
+#if defined(__linux__)
+    if (evidence == nullptr) {
+        // modes=0 -> 只读查询内核时间状态，不调整时钟。
+        struct timex tx {};
+        int state = ntp_adjtime(&tx);
+        if (state >= 0 && state != TIME_ERROR && (tx.status & STA_UNSYNC) == 0) {
+            evidence = "kernel clock synchronized (STA_UNSYNC cleared)";
+        }
+    }
+    if (evidence == nullptr && cfg_.requireSyncEvidence) {
+        st.detail = "no trusted time-sync evidence (STA_UNSYNC set, no marker)";
+        return st;
+    }
+#else
+    // 非 Linux 仅用于开发/测试主机：无内核同步标志来源，以合理性下限为准。
+    if (evidence == nullptr) {
+        evidence = "host clock above min_valid_epoch (non-linux build)";
+    }
+#endif
+
+    st.synchronized = true;
+    st.detail = evidence != nullptr ? evidence : "min_valid_epoch only";
+    ready_.store(true, std::memory_order_release);
+    return st;
 }
 
 } // namespace ota

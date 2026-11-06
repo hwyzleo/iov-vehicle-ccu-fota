@@ -10,6 +10,7 @@
 #include "ccu/fota/ota/mock/mock_ports.hpp"
 #include "ccu/fota/ota/fota_cloud_proxy_via_transport.hpp"
 #include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/ota/ports/production_ports.hpp"
 #include "ccu/fota/store/fota_cloud_state_store.hpp"
 #include "ccu/fota/store/fota_state_migration.hpp"
 #include "ccu/fota/store/fota_state_store.hpp"
@@ -300,4 +301,111 @@ TEST(OtaIntegration, ControlDedup) {
     EXPECT_EQ(o1.status, ::vehicle::fota::v1::CONTROL_ACK_STATUS_APPLIED);
     auto o2 = h.orch->applyControl(cmd);  // 相同 revision
     EXPECT_EQ(o2.status, ::vehicle::fota::v1::CONTROL_ACK_STATUS_RECEIVED);
+}
+
+// ---------------------------------------------------------------------------
+// 13. 时钟门禁：系统时钟未与可信时间源同步前不发出任何上行
+//
+// 上行 Envelope 的 timestamp_ms/expire_at_ms 由 CLOCK_REALTIME 推导。CCU 上电后
+// RTC 可能尚未同步，此时 expire_at_ms 落在过去，云侧网关按契约判定 MESSAGE_EXPIRED
+// 并丢入上行 DLQ（消息永久丢失且无业务回执）。因此启动期的版本/清单上报必须等到
+// 时钟同步之后，而不是先发一条注定被拒的消息。
+// ---------------------------------------------------------------------------
+namespace {
+
+// 可控时钟判定来源：由测试切换就绪状态并记录查询次数。
+class FakeClockSyncProvider : public ClockSyncProvider {
+public:
+    ClockSyncStatus status() override {
+        ++queries;
+        ClockSyncStatus st;
+        st.synchronized = synchronized;
+        // 未同步时返回 RTC 回落后的时间（1970），同步后返回合理时间。
+        st.systemTimeMs = synchronized ? 1767225600000LL : 1000LL;
+        st.detail = synchronized ? "test: synced" : "test: RTC unset";
+        return st;
+    }
+
+    bool synchronized = false;
+    int queries = 0;
+};
+
+} // namespace
+
+TEST(OtaIntegration, ClockSyncGateWithholdsUplinkUntilSynchronized) {
+    MockHarness h;
+    h.init(happyScenarioJson());
+
+    FakeClockSyncProvider clock;  // 初始未同步
+    FotaOrchestratorConfig cfg;   // requireClockSync 缺省 true
+    h.orch = std::make_unique<FotaOrchestrator>(*h.cloud, *h.inv, *h.consent, *h.dl,
+                                                *h.cond, *h.exec, *h.log, *h.cloudStore,
+                                                cfg, &clock);
+
+    // 时钟未同步：反复 step 都停在门禁前，状态不推进，云侧收不到任何上行。
+    for (int i = 0; i < 3; ++i) {
+        auto o = h.orch->step();
+        EXPECT_TRUE(o.awaitingClockSync);
+        EXPECT_EQ(o.action, "awaitClockSync");
+        EXPECT_FALSE(o.terminal);
+        EXPECT_NE(o.error.find("system clock not synchronized"), std::string::npos);
+        EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::None);
+    }
+    EXPECT_EQ(clock.queries, 3);
+    EXPECT_EQ(h.transport->acceptedSequenceNo(), 0u);
+    EXPECT_FALSE(h.transport->finalAccepted());
+
+    // 时钟同步后上报不丢，只是延后：同一实例继续推进到终态。
+    clock.synchronized = true;
+    auto last = h.runToTerminal(80);
+    EXPECT_FALSE(last.awaitingClockSync);
+    EXPECT_TRUE(last.terminal);
+    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
+    EXPECT_TRUE(h.transport->finalAccepted());
+}
+
+TEST(OtaIntegration, ClockSyncGateDisabledKeepsLegacyBehaviour) {
+    MockHarness h;
+    h.init(happyScenarioJson());
+
+    FakeClockSyncProvider clock;  // 保持未同步
+    FotaOrchestratorConfig cfg;
+    cfg.requireClockSync = false;  // 实验台：显式关闭门禁
+    h.orch = std::make_unique<FotaOrchestrator>(*h.cloud, *h.inv, *h.consent, *h.dl,
+                                                *h.cond, *h.exec, *h.log, *h.cloudStore,
+                                                cfg, &clock);
+
+    auto o = h.orch->step();
+    EXPECT_FALSE(o.awaitingClockSync);
+    EXPECT_EQ(o.action, "checkTask");
+    EXPECT_EQ(clock.queries, 0);  // 门禁关闭时不查询时钟
+}
+
+// ---------------------------------------------------------------------------
+// 14. SystemClockSyncProvider：合理性下限与就绪锁存
+// ---------------------------------------------------------------------------
+TEST(SystemClockSync, RejectsClockBelowMinValidEpoch) {
+    SystemClockSyncConfig cfg;
+    cfg.minValidEpochMs = 4102444800000LL;  // 2100-01-01，真实系统时间必定更早
+    cfg.syncMarkerPath = "";                // 不依赖授时服务标记
+    SystemClockSyncProvider p(cfg);
+
+    auto st = p.status();
+    EXPECT_FALSE(st.synchronized);
+    EXPECT_GT(st.systemTimeMs, 0);
+    EXPECT_NE(std::string(st.detail).find("min_valid_epoch"), std::string::npos);
+}
+
+TEST(SystemClockSync, AcceptsPlausibleClockAndLatches) {
+    SystemClockSyncConfig cfg;
+    cfg.minValidEpochMs = 1LL;
+    cfg.syncMarkerPath = "";
+    cfg.requireSyncEvidence = false;  // 无授时证据来源，仅做合理性下限判定
+    SystemClockSyncProvider p(cfg);
+
+    EXPECT_TRUE(p.status().synchronized);
+    // 第二次查询走锁存路径，不再重复判定（避免门禁抖动导致业务反复停摆）。
+    auto second = p.status();
+    EXPECT_TRUE(second.synchronized);
+    EXPECT_STREQ(second.detail, "latched");
 }

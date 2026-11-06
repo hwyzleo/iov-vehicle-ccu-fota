@@ -32,6 +32,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <thread>
 
@@ -44,6 +45,9 @@ public:
     // （resolveTboxGenericTransport 校验通过）。端口与 cloudStore 由共享所有权持有
     // （daemon 生命周期内保持存活）。businessTrigger：true 时 start() 会启动定时
     // step()（开放业务触发）。
+    // clockSync：时钟就绪判定来源。orchCfg.requireClockSync=true（缺省）时必须注入，
+    // 否则 create() 抛 std::invalid_argument（fail-closed：不允许在时钟不可信的
+    // 情况下静默上行）。
     static std::unique_ptr<FotaDaemon> create(
         ccu::fw::someip::SomeIpRuntime& runtime,
         const ccu_fota::someip::TboxGenericTransportAddress& address,
@@ -56,7 +60,8 @@ public:
         std::shared_ptr<ota::VehicleConditionProvider> cond,
         std::shared_ptr<ota::InstallExecutor> exec,
         std::shared_ptr<ota::LogCollector> log,
-        std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore);
+        std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
+        std::shared_ptr<ota::ClockSyncProvider> clockSync = nullptr);
 
     ~FotaDaemon();
 
@@ -87,9 +92,12 @@ private:
                std::shared_ptr<ota::VehicleConditionProvider> cond,
                std::shared_ptr<ota::InstallExecutor> exec,
                std::shared_ptr<ota::LogCollector> log,
-               std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore);
+               std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
+               std::shared_ptr<ota::ClockSyncProvider> clockSync);
 
     void timerLoop();
+    // 记录 step 结果中需要运维可见的状态（当前：等待时钟同步的进入/退出）。
+    void observeStep(const ota::StepOutcome& outcome);
 
     ccu::fw::someip::SomeIpRuntime& runtime_;
     ccu_fota::SomeIpTransportConfig transportCfg_;
@@ -108,9 +116,13 @@ private:
     std::shared_ptr<ota::InstallExecutor> exec_;
     std::shared_ptr<ota::LogCollector> log_;
     std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore_;
+    std::shared_ptr<ota::ClockSyncProvider> clockSync_;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{false};
+    // 当前是否因系统时钟未同步而停在上行门禁前（决定 timer 轮询间隔与日志节流）。
+    std::atomic<bool> awaitingClockSync_{false};
+    std::uint64_t clockWaitPolls_ = 0;  // 仅 timer/start 线程访问
     std::thread timerThread_;
     mutable std::mutex timerMutex_;
     std::condition_variable timerCv_;

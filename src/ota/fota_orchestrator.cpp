@@ -27,9 +27,11 @@ FotaOrchestrator::FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv
                                    ConsentProvider& consent, PackageDownloader& dl,
                                    VehicleConditionProvider& cond, InstallExecutor& exec,
                                    LogCollector& log, store::fota::FotaCloudStateStore& store,
-                                   FotaOrchestratorConfig cfg)
+                                   FotaOrchestratorConfig cfg,
+                                   ClockSyncProvider* clockSync)
     : cloud_(cloud), inv_(inv), consent_(consent), dl_(dl), cond_(cond),
-      exec_(exec), log_(log), store_(store), cfg_(std::move(cfg)) {}
+      exec_(exec), log_(log), store_(store), cfg_(std::move(cfg)),
+      clockSync_(clockSync) {}
 
 CallContext FotaOrchestrator::makeCtx(const std::string& idempotencyKey) const {
     CallContext ctx;
@@ -169,6 +171,27 @@ bool FotaOrchestrator::emit(const ::vehicle::fota::v1::ExecutionEvent& evt) {
 }
 
 // ---------------------------------------------------------------------------
+// 时钟门禁：上行 Envelope 的 timestamp_ms/expire_at_ms 由 CLOCK_REALTIME 推导，
+// 时钟未与可信时间源同步时 expire_at_ms 落在过去，云侧网关按契约判定
+// MESSAGE_EXPIRED 并丢入上行 DLQ（消息永久丢失且无业务回执）。因此时钟未就绪时
+// 不发出任何上行，只保留 durable 状态等待下次重试（fail-closed）。
+// ---------------------------------------------------------------------------
+bool FotaOrchestrator::clockReady(StepOutcome& outcome) {
+    if (!cfg_.requireClockSync || clockSync_ == nullptr) {
+        return true;
+    }
+    ClockSyncStatus st = clockSync_->status();
+    if (st.synchronized) {
+        return true;
+    }
+    outcome.action = "awaitClockSync";
+    outcome.awaitingClockSync = true;
+    outcome.error = std::string("system clock not synchronized: ") + st.detail +
+                    ", systemTimeMs=" + std::to_string(st.systemTimeMs);
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // step: 状态驱动分步推进
 // ---------------------------------------------------------------------------
 StepOutcome FotaOrchestrator::step() {
@@ -178,6 +201,10 @@ StepOutcome FotaOrchestrator::step() {
     if (isTerminalVehicleTaskState(vtState_)) {
         o.terminal = true;
         o.action = "terminal";
+        return o;
+    }
+    // 任何上行之前先过时钟门禁（覆盖启动期首次版本/清单上报与后续全部阶段）。
+    if (!clockReady(o)) {
         return o;
     }
     switch (vtState_) {
