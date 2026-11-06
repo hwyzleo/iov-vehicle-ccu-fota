@@ -308,6 +308,45 @@ TEST(TransportContract, CorrelationIsolatesConcurrentCalls) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Envelope 身份契约：message_id 每条传输消息唯一，request_id 跨传输稳定。
+//     回归：首次 checkTask 无 VehicleTask 时 request_id 退化为常量，
+//     message_id 若复用 request_id 会与历史消息同名不同内容（云端 digest conflict）。
+// ---------------------------------------------------------------------------
+TEST(TransportContract, MessageIdUniquePerTransportMessage) {
+    FotaMessageCodec codec;
+    CallContext ctx;
+    ctx.requestId = "req-checkTask-initial";   // 业务身份：跨多次传输不变
+    ctx.idempotencyKey = "checkTask-initial";
+    ctx.deviceId = "DEV-001";
+    ctx.vin = "VIN-FIXTURE-0001";
+    ctx.timeout = std::chrono::milliseconds(1000);
+
+    auto ids1 = codec.identityFrom(ctx);
+    auto ids2 = codec.identityFrom(ctx);
+
+    EXPECT_FALSE(ids1.messageId.empty());
+    EXPECT_NE(ids1.messageId, ctx.requestId);          // 不得复用 request_id
+    EXPECT_NE(ids1.messageId, ids2.messageId);         // 同一业务操作的再次传输也不同
+    EXPECT_EQ(ids1.requestId, ctx.requestId);          // 业务请求身份保持不变
+    EXPECT_EQ(ids2.requestId, ctx.requestId);
+    EXPECT_EQ(ids1.idempotencyKey, ctx.idempotencyKey);
+
+    ::vehicle::fota::v1::TaskCheckRequest req;
+    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+    auto msg1 = codec.encodeRequest(payload_type::kTaskCheckRequest, req, ids1, ctx);
+    auto msg2 = codec.encodeRequest(payload_type::kTaskCheckRequest, req, ids2, ctx);
+
+    EXPECT_EQ(msg1.envelope.message_id(), ids1.messageId);
+    EXPECT_EQ(msg2.envelope.message_id(), ids2.messageId);
+    EXPECT_NE(msg1.envelope.message_id(), msg2.envelope.message_id());
+    EXPECT_EQ(msg1.envelope.message_kind(),
+              ::vehicle::common::v1::MESSAGE_KIND_REQUEST);
+    EXPECT_EQ(msg1.envelope.request_id(), ctx.requestId);
+    EXPECT_EQ(msg1.envelope.idempotency_key(), ctx.idempotencyKey);
+    EXPECT_FALSE(msg1.envelope.has_correlation_id());  // REQUEST 不携带 correlation
+}
+
+// ---------------------------------------------------------------------------
 // 3. 响应类型错配 / message kind 错配 / 版本不匹配 / service 错配。
 // ---------------------------------------------------------------------------
 TEST(TransportContract, DecodeRejectsWrongTypeKindVersion) {

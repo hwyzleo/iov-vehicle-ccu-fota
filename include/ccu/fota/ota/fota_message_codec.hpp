@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include "ccu/fota/ota/call_context.hpp"
+#include "ccu/fota/ota/message_id.hpp"
 #include "ccu/fota/ota/payload_types.hpp"
 #include "ccu/fota/ota/vehicle_message_transport.hpp"
 
@@ -38,7 +39,7 @@ namespace ota {
 // ---------------------------------------------------------------------------
 struct EnvelopeIdentity {
     std::string messageId;         // 本次传输消息 ID（请求全局唯一）
-    std::string correlationId;     // 响应需回填的关联 ID（= 请求 messageId）
+    std::string correlationId;     // 下行/响应需回填的关联 ID（= 请求 messageId）；REQUEST 为空
     std::string requestId;         // 稳定业务请求身份（跨多次传输不变）
     std::string idempotencyKey;    // 写操作幂等键
     std::string vehicleTaskId;
@@ -106,11 +107,20 @@ public:
         : expectedProtocolVersion_(std::move(expectedProtocolVersion))
         , expectedService_(std::string(payload_type::kService)) {}
 
-    // 从调用上下文推导稳定操作身份（业务 payload 不再内嵌信封）。
+    // 从调用上下文推导 Envelope 身份（业务 payload 不再内嵌信封）。
+    //
+    // §13.10.3 契约：请求 message_id 全局唯一（每条传输消息一个），request_id 才是
+    // 跨多次传输稳定不变的业务身份，二者不得同值。若复用 request_id（如
+    // "req-checkTask-<vehicle_task_id>"，且 vehicle_task_id 为空时退化为常量），
+    // 同一业务操作的再次传输会与历史消息同 ID 而内容不同，云端按
+    // (message_id, Envelope 摘要) 判为 digest conflict 并进 DLQ。
+    // 每次调用生成新的 message_id：重试/恢复重投携带新的传输消息身份，
+    // 幂等语义由 request_id + idempotency_key 承载。
     EnvelopeIdentity identityFrom(const CallContext& ctx) const {
         EnvelopeIdentity ids;
-        ids.messageId = ctx.requestId;
-        ids.correlationId = ctx.requestId;
+        ids.messageId = nextMessageId();
+        // REQUEST 不携带 correlation_id；RESPONSE 由云端回填请求 message_id。
+        ids.correlationId.clear();
         ids.requestId = ctx.requestId;
         ids.idempotencyKey = ctx.idempotencyKey;
         ids.vehicleTaskId = ctx.vehicleTaskId;

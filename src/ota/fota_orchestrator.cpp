@@ -257,7 +257,12 @@ StepOutcome FotaOrchestrator::doCheckTask() {
 
     ::vehicle::fota::v1::TaskCheckResponse resp;
     try {
-        resp = cloud_.checkTask(req, makeCtx("checkTask-" + frozenTask_.vehicle_task_id()));
+        // 稳定业务身份：首次 checkTask 时 cloud 尚未下发 VehicleTask，vehicle_task_id
+        // 为空，不得拼出 "checkTask-" 这样的退化常量身份（多车共享同一 request_id）。
+        // 传输层 message_id 由 FotaMessageCodec 独立生成，与此处的 request_id 无关。
+        const std::string localTaskId = frozenTask_.vehicle_task_id();
+        resp = cloud_.checkTask(
+            req, makeCtx("checkTask-" + (localTaskId.empty() ? "initial" : localTaskId)));
     } catch (const FotaCloudException& e) {
         o.error = e.what();
         o.transportFailed = true;
