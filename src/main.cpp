@@ -260,7 +260,25 @@ int main(int argc, char* argv[]) {
             ccu_fota::ota::FotaOrchestratorConfig orch_cfg;
             orch_cfg.protocolVersion = fotaConfig.cloud.protocolVersion;
             orch_cfg.deviceId = "ccu-fota";
-            orch_cfg.vin = "";  // 设备身份由车辆 provisioning 提供（独立边界）
+            // 车辆 VIN 是契约 B Envelope 身份的一部分：云侧（VAGW/IOV-OTA）以
+            // Kafka Key(VIN) = Envelope.vin 为硬契约，空 VIN 上行会被判为不可恢复
+            // 契约错误并整体丢入 DLQ。VIN 与车内软件清单同源：DIAG（CR-007 Client）。
+            // 解析失败 fail-closed：不启动契约 B，绝不发出无 VIN 的上行。
+            std::string vehicle_vin;
+            if (diag_client->availability() != someip_fw::Availability::Available ||
+                !diag_client->getVin(vehicle_vin) || vehicle_vin.empty()) {
+                FotaLogAdapter::orchestrator().error(
+                    fota_events::CLOUD_VIN_UNRESOLVED,
+                    "Vehicle VIN unresolved from DIAG, contract B blocked",
+                    {flog::f_str("source", "diag"),
+                     flog::f_str("availability",
+                                 diag_client->availability() ==
+                                         someip_fw::Availability::Available
+                                     ? "Available"
+                                     : "Unavailable")});
+                return 1;
+            }
+            orch_cfg.vin = vehicle_vin;
             orch_cfg.cloudCallTimeout = fotaConfig.cloud.cloudCallTimeout;
             orch_cfg.eventOutboxMax = fotaConfig.cloud.eventOutboxMax;
             orch_cfg.taskCheckInterval = fotaConfig.cloud.taskCheckInterval;

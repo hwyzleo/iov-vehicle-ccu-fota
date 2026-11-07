@@ -45,6 +45,8 @@ constexpr const char* STORE_SEQ_BLOCKED          = "fota.store.seq.blocked";
 // Cloud uplink gating（时钟门禁：上行绝对时间字段依赖可信系统时钟）
 constexpr const char* CLOUD_CLOCK_SYNC_PENDING   = "fota.cloud.clock_sync.pending";
 constexpr const char* CLOUD_CLOCK_SYNC_READY     = "fota.cloud.clock_sync.ready";
+// 车辆 VIN 未解析：契约 B Envelope 身份不完整，上行会被云侧判为契约错误，禁止启动。
+constexpr const char* CLOUD_VIN_UNRESOLVED       = "fota.cloud.vin.unresolved";
 } // namespace fota_events
 
 // ============================================================

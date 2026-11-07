@@ -46,7 +46,9 @@ namespace ota {
 struct FotaOrchestratorConfig {
     std::string protocolVersion = "fota-v1";
     std::string deviceId = "dev-mock";
-    std::string vin = "MOCKVIN0000000001";
+    // 必填：车辆 VIN。由装配层（DIAG/车辆 provisioning）注入，禁止 mock 默认值：
+    // 云侧以 Kafka Key(VIN) = Envelope.vin 为硬契约，空 VIN 上行必被丢入 DLQ。
+    std::string vin;
     std::chrono::milliseconds cloudCallTimeout{10000};
     std::chrono::milliseconds taskCheckInterval{60000};
     bool reconcileOnStart = true;

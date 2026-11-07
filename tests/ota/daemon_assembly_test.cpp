@@ -195,6 +195,7 @@ TEST(DaemonAssembly, MainWiringCreatesAndHoldsContractB) {
 
     FotaOrchestratorConfig orchCfg;
     orchCfg.protocolVersion = "fota-v1";
+    orchCfg.vin = "VINDAEMON";  // Envelope 身份必填（生产由 main.cpp 从 DIAG 解析）
     orchCfg.cloudCallTimeout = std::chrono::milliseconds(2000);
     orchCfg.taskCheckInterval = std::chrono::milliseconds(60000);  // 测试期不触发
     // 本测试只验证装配/传输路径，不注入时钟判定来源；关闭时钟门禁以保持原语义
@@ -293,4 +294,62 @@ TEST(DaemonAssembly, MainWiringCreatesAndHoldsContractB) {
     daemon.reset();
     rt.stop();
     std::filesystem::remove_all(root);
+}
+
+// ---------------------------------------------------------------------------
+// 空 VIN 装配 fail-closed：Envelope.vin 为空的上行会被云侧按
+// "Kafka Key(VIN) ≠ Envelope.vin" 判为不可恢复契约错误，必须在装配阶段拒绝。
+// ---------------------------------------------------------------------------
+TEST(DaemonAssembly, EmptyVinIsRejectedAtAssembly) {
+    auto rt = someip_fw::SomeIpRuntime::create(makeDaemonTestConfig());
+    rt.start();
+
+    auto root = std::filesystem::temp_directory_path() /
+                ("fota-daemon-novin-" + std::to_string(getpid()) + "-" +
+                 std::to_string(nowMs()));
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    auto fotaStore = std::make_shared<FotaStateStore>(
+        FotaStateStore::open(root, 100, 3600000));
+    auto rawStore = fotaStore->underlyingStore();
+    migrateOtaToFota(rawStore);
+    auto cloudStore = std::make_shared<FotaCloudStateStore>(std::move(rawStore));
+
+    FotaConfig fotaCfg;
+    fotaCfg.genericTransport.methodId = kGenericMethod;
+    fotaCfg.genericTransport.eventId = kGenericEvent;
+    fotaCfg.genericTransport.eventgroupId = kGenericGroup;
+    fotaCfg.genericTransport.interfaceMajor = 1;
+    ccu_fota::someip::TboxGenericTransportAddress addr;
+    ASSERT_TRUE(ccu_fota::someip::resolveTboxGenericTransport(fotaCfg, addr));
+
+    auto scenario = parseScenario(R"({
+      "scenario": "daemon",
+      "clock": "virtual",
+      "inventory": {"mode": "FULL", "baseline": "BASE-001"},
+      "packages": [],
+      "faults": []
+    })");
+    auto inv = std::make_shared<MockInventoryProvider>(scenario);
+    auto consent = std::make_shared<MockConsentProvider>();
+    auto dl = std::make_shared<MockPackageDownloader>(scenario);
+    auto cond = std::make_shared<MockVehicleConditionProvider>();
+    auto exec = std::make_shared<MockInstallExecutor>(scenario);
+    auto log = std::make_shared<MockLogCollector>();
+
+    SomeIpTransportConfig transportCfg;
+    transportCfg.exchangeTimeout = std::chrono::milliseconds(2000);
+    transportCfg.availabilityWait = std::chrono::milliseconds(2000);
+    transportCfg.maxPayloadBytes = 262144;
+
+    FotaOrchestratorConfig orchCfg;   // vin 留空 -> fail-closed
+    orchCfg.requireClockSync = false;
+
+    EXPECT_THROW(daemon::FotaDaemon::create(
+        rt, addr, transportCfg, orchCfg, /*businessTrigger=*/false,
+        inv, consent, dl, cond, exec, log, cloudStore),
+        std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+    rt.stop();
 }

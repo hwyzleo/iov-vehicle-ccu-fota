@@ -50,6 +50,13 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
     if (!inv_ || !consent_ || !dl_ || !cond_ || !exec_ || !log_ || !cloudStore_) {
         throw std::invalid_argument("FotaDaemon: ports/store must be non-null");
     }
+    // fail-closed：Envelope 身份必须完整。VIN 为空时云侧（VAGW/IOV-OTA）会以
+    // "Kafka Key(VIN) ≠ Envelope.vin" 判为不可恢复契约错误并丢入 DLQ，
+    // 因此拒绝装配而不是静默发出无效上行。
+    if (orchCfg_.vin.empty()) {
+        throw std::invalid_argument(
+            "FotaDaemon: Envelope vin must be resolved before create");
+    }
     // fail-closed：要求时钟门禁但未注入判定来源时拒绝装配，不退化为"不检查"。
     if (orchCfg_.requireClockSync && !clockSync_) {
         throw std::invalid_argument(
