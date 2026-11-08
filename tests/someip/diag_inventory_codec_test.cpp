@@ -1,10 +1,11 @@
 // =============================================================================
 // tests/someip/diag_inventory_codec_test.cpp
-// CCU-DIAG 清单 payload v1 解码器单元测试 (CCU-FOTA-DSN-CR-013 §测试矩阵 单元 1)
+// CCU-DIAG 清单 payload 解码器单元测试 (CCU-FOTA-DSN-CR-013 §测试矩阵 单元 1
+//                                          / CCU-FOTA-DSN-CR-014 D1)
 // -----------------------------------------------------------------------------
-// 覆盖：合法 payload（含 ecuList 逐 ECU 明细）、字段名 camelCase/snake_case 别名、
-// 缺字段、空 ecuList、未知 schemaVersion、非法枚举、重复 ecuId、非 JSON ->
-// 全部 fail-closed（不得返回“成功 + 部分清单”）。
+// 覆盖：payload v1/v2 解码（v2 独立软件件号）、serialNumber 不进入件号字段、
+// 字段名 camelCase/snake_case 别名、缺字段、空 ecuList、未知 schemaVersion、
+// 非法枚举、重复 ecuId、非 JSON -> 全部 fail-closed。
 // =============================================================================
 
 #include "ccu/fota/someip/diag_inventory_codec.hpp"
@@ -40,10 +41,41 @@ std::string validPayload() {
     })";
 }
 
+// payload v2（CCU-DIAG-DSN-CR-012 §5.2）：独立软件件号 + 序列号 + 硬件版本。
+std::string validPayloadV2() {
+    return R"({
+      "schemaVersion": 2,
+      "inventorySource": "hardware",
+      "vin": "VINTEST0000000001",
+      "vinSource": "PROVISIONED",
+      "baselineId": "BASE-001",
+      "baselineSource": "factory",
+      "registryVersion": "2026.11.1",
+      "collectedAt": "2026-11-08T10:00:00Z",
+      "overallResult": "all_ok",
+      "ecuList": [
+        {"ecuId":"BMS","partNumber":"PN-BMS","softwarePartNumber":"SW-BMS",
+         "serialNumber":"SN-BMS","swVersion":"1.0.0","hwVersion":"HW-BMS",
+         "source":"UDS_0x22","status":"ok","errorCode":""},
+        {"ecuId":"VCU","partNumber":"PN-VCU","softwarePartNumber":"SW-VCU",
+         "serialNumber":"SN-VCU","swVersion":"2.0.0","hwVersion":"HW-VCU",
+         "source":"SOMEIP_GET_VERSION","status":"ok"}
+      ]
+    })";
+}
+
 // 用给定 JSON 文本做一次解码并返回错误码（成功返回空串）。
 std::string decodeError(const std::string& payload) {
     auto r = DiagInventoryCodec::decode(payload);
     return r.ok ? std::string() : r.errorCode;
+}
+
+// 精确子串替换（长度由 needle 自身决定，避免手数偏移量）。
+void replaceOnce(std::string& hay, const std::string& needle,
+                 const std::string& repl) {
+    const auto pos = hay.find(needle);
+    ASSERT_NE(pos, std::string::npos) << "needle not found: " << needle;
+    hay.replace(pos, needle.size(), repl);
 }
 
 } // namespace
@@ -144,12 +176,90 @@ TEST(DiagInventoryCodec, MissingEcuListFailsClosed) {
 }
 
 // ---------------------------------------------------------------------------
+// payload v2：五类事实独立解码，partNumber 与 softwarePartNumber 保持不同值；
+// serialNumber 不进入任何件号字段（CR-014 US-040）。
+// ---------------------------------------------------------------------------
+TEST(DiagInventoryCodec, DecodesPayloadV2WithIndependentSoftwarePartNumber) {
+    auto r = DiagInventoryCodec::decode(validPayloadV2());
+    ASSERT_TRUE(r.ok) << r.errorCode << " " << r.errorDetail;
+    const auto& s = r.snapshot;
+    EXPECT_EQ(s.schema_version, "2");
+    EXPECT_EQ(s.registry_version, "2026.11.1");
+    ASSERT_EQ(s.ecu_list.size(), 2u);
+
+    EXPECT_EQ(s.ecu_list[0].ecu_id, "BMS");
+    ASSERT_TRUE(s.ecu_list[0].part_number.has_value());
+    EXPECT_EQ(*s.ecu_list[0].part_number, "PN-BMS");
+    ASSERT_TRUE(s.ecu_list[0].software_part_number.has_value());
+    EXPECT_EQ(*s.ecu_list[0].software_part_number, "SW-BMS");
+    EXPECT_NE(*s.ecu_list[0].part_number,
+              *s.ecu_list[0].software_part_number);
+    EXPECT_EQ(s.ecu_list[0].sw_version.value_or(""), "1.0.0");
+    EXPECT_EQ(s.ecu_list[0].hw_version.value_or(""), "HW-BMS");
+
+    EXPECT_EQ(s.ecu_list[1].ecu_id, "VCU");
+    EXPECT_EQ(*s.ecu_list[1].software_part_number, "SW-VCU");
+    EXPECT_EQ(s.ecu_list[1].hw_version.value_or(""), "HW-VCU");
+
+    // serialNumber 不入任何 PN 字段（本 DTO 无 SN 字段）。
+    for (const auto& e : s.ecu_list) {
+        if (e.part_number) EXPECT_NE(*e.part_number, "SN-BMS");
+        if (e.part_number) EXPECT_NE(*e.part_number, "SN-VCU");
+        if (e.software_part_number) {
+            EXPECT_NE(*e.software_part_number, "SN-BMS");
+            EXPECT_NE(*e.software_part_number, "SN-VCU");
+        }
+    }
+}
+
+// v2 未知软件件号输出空串（DIAG 契约）=> 按“未提供”处理，由采集端口 fail-closed。
+TEST(DiagInventoryCodec, PayloadV2EmptySoftwarePartNumberIsMissing) {
+    std::string payload = validPayloadV2();
+    replaceOnce(payload, "\"softwarePartNumber\":\"SW-BMS\"",
+                "\"softwarePartNumber\":\"\"");
+    auto r = DiagInventoryCodec::decode(payload);
+    ASSERT_TRUE(r.ok) << r.errorCode << " " << r.errorDetail;
+    EXPECT_FALSE(r.snapshot.ecu_list[0].software_part_number.has_value());
+    // 仍不得用 partNumber 补齐。
+    EXPECT_EQ(*r.snapshot.ecu_list[0].part_number, "PN-BMS");
+}
+
+// payload v1：字段集冻结，无软件件号 => 保持缺失（即使对端意外提供也不读取）。
+TEST(DiagInventoryCodec, PayloadV1NeverPopulatesSoftwarePartNumber) {
+    auto r = DiagInventoryCodec::decode(validPayload());
+    ASSERT_TRUE(r.ok) << r.errorCode << " " << r.errorDetail;
+    ASSERT_EQ(r.snapshot.ecu_list.size(), 2u);
+    EXPECT_FALSE(r.snapshot.ecu_list[0].software_part_number.has_value());
+    EXPECT_FALSE(r.snapshot.ecu_list[1].software_part_number.has_value());
+    // 总成件号仍然可用，且不被解释为软件件号。
+    ASSERT_TRUE(r.snapshot.ecu_list[0].part_number.has_value());
+    EXPECT_EQ(*r.snapshot.ecu_list[0].part_number, "PN-BMS");
+}
+
+TEST(DiagInventoryCodec, PayloadV1IgnoresUnexpectedSoftwarePartNumber) {
+    std::string payload = validPayload();
+    replaceOnce(payload, "\"partNumber\":\"PN-BMS\"",
+                "\"partNumber\":\"PN-BMS\",\"softwarePartNumber\":\"SW-BMS\"");
+    auto r = DiagInventoryCodec::decode(payload);
+    ASSERT_TRUE(r.ok) << r.errorCode;
+    // v1 不解码该字段：保持缺失，不建立跨版本兜底语义。
+    EXPECT_FALSE(r.snapshot.ecu_list[0].software_part_number.has_value());
+}
+
+// serialNumber 类型非法 -> fail-closed（字段仍然要结构化校验）。
+TEST(DiagInventoryCodec, PayloadV2InvalidSerialNumberFailsClosed) {
+    std::string payload = validPayloadV2();
+    replaceOnce(payload, "\"serialNumber\":\"SN-BMS\"",
+                "\"serialNumber\":123");
+    EXPECT_EQ(decodeError(payload), ota::inventory_error::kDiagPayloadInvalid);
+}
+
+// ---------------------------------------------------------------------------
 // 未知/缺失 schemaVersion：不猜测字段集合
 // ---------------------------------------------------------------------------
 TEST(DiagInventoryCodec, UnknownSchemaVersionFailsClosed) {
-    std::string payload = validPayload();
-    payload.replace(payload.find("\"schemaVersion\": 1"), 18,
-                    "\"schemaVersion\": 2");
+    std::string payload = validPayloadV2();
+    replaceOnce(payload, "\"schemaVersion\": 2", "\"schemaVersion\": 3");
     EXPECT_EQ(decodeError(payload), ota::inventory_error::kDiagPayloadInvalid);
 }
 

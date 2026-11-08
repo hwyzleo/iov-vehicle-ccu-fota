@@ -455,10 +455,16 @@ StepOutcome FotaOrchestrator::doCheckTask() {
     // 采集（Defer：采集阶段不得分配 revision；失败/空清单不上报）。
     auto inv = inv_.collectInventory();
     if (!inv.collected || inv.ecuList.empty()) {
+        // CR-014 D3：优先透出采集端口给出的可定位错误码（如
+        // FOTA-INVENTORY-REQUIRED-FACT-MISSING），否则回退为既有空清单错误码。
+        const std::string errorCode = inv.collectionErrorCode.empty()
+                                          ? std::string("FOTA-INVENTORY-COLLECT-EMPTY")
+                                          : inv.collectionErrorCode;
         FotaLogAdapter::orchestrator().warn(
             fota_events::INVENTORY_COLLECT_EMPTY,
             "Inventory collect failed or empty, uplink skipped",
-            {flog::f_str("error_code", "FOTA-INVENTORY-COLLECT-EMPTY")});
+            {flog::f_str("error_code", errorCode),
+             flog::f_str("error_detail", inv.collectionErrorDetail)});
         o.error = "inventory collect failed or empty";
         return o;
     }

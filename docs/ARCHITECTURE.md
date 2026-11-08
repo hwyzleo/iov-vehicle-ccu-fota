@@ -67,7 +67,8 @@ struct VehicleSoftwareSnapshot {
 ```cpp
 struct EcuVersionEntry {
     std::string ecu_id;
-    std::optional<std::string> part_number;
+    std::optional<std::string> part_number;           // 总成/备件件号 -> hardware_part_number
+    std::optional<std::string> software_part_number;  // 独立软件件号 -> software_part_number（CR-014）
     std::optional<std::string> sw_version;
     std::optional<std::string> hw_version;
     VersionSource source;

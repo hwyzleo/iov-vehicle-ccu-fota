@@ -65,6 +65,8 @@ json ecuEntryToJson(const EcuVersionEntry& e) {
                   {"source", versionSourceToString(e.source)},
                   {"status", ecuStatusToString(e.status)}};
     if (e.part_number) j["part_number"] = *e.part_number;
+    // CR-014：独立软件件号纳入 legacy 快照记录（与总成件号分离往返）。
+    if (e.software_part_number) j["software_part_number"] = *e.software_part_number;
     if (e.sw_version)  j["sw_version"]  = *e.sw_version;
     if (e.hw_version)  j["hw_version"]  = *e.hw_version;
     if (e.error_code)  j["error_code"]  = *e.error_code;
@@ -91,6 +93,9 @@ EcuVersionEntry ecuEntryFromJson(const json& j) {
         else throw StateDecodeError("EcuVersionEntry bad status: " + s);
     }
     if (j.contains("part_number")) e.part_number = j["part_number"].get<std::string>();
+    // 旧记录无该字段 => 保持缺失（不得用 part_number 补齐）。
+    if (j.contains("software_part_number"))
+        e.software_part_number = j["software_part_number"].get<std::string>();
     if (j.contains("sw_version"))  e.sw_version  = j["sw_version"].get<std::string>();
     if (j.contains("hw_version"))  e.hw_version  = j["hw_version"].get<std::string>();
     if (j.contains("error_code"))  e.error_code  = j["error_code"].get<std::string>();
@@ -187,6 +192,8 @@ bool isValidHex64(const std::string& h) {
 
 // 任一 hex 非空时必须 algorithm="sha-256" 且 canonicalization 为已知快照域；
 // 所有非空 hex 必须为 64 小写 hex。空 fingerprints 视为未知/遗留，允许。
+// CR-014：快照域升至 cgw-fota-snapshot-v2，v1 记录仍可读取；未知域 fail-closed。
+// 保留域名而比较仍以 canonicalization 相等为前提（不跨版本比较）。
 void validatePersistedFingerprints(const PersistedFingerprints& fp,
                                    const char* stage) {
     bool anyHex = !fp.versionFingerprintHex.empty() ||
@@ -197,7 +204,8 @@ void validatePersistedFingerprints(const PersistedFingerprints& fp,
             throw StateDecodeError(std::string(stage) +
                                    " bad fingerprint algorithm: " + fp.algorithm);
         }
-        if (fp.canonicalization != "cgw-fota-snapshot-v1") {
+        if (fp.canonicalization != "cgw-fota-snapshot-v1" &&
+            fp.canonicalization != "cgw-fota-snapshot-v2") {
             throw StateDecodeError(std::string(stage) +
                                    " bad fingerprint canonicalization: " +
                                    fp.canonicalization);

@@ -10,6 +10,7 @@
 
 #include "ccu/fota/fingerprint/canonical_encoder.hpp"
 #include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
+#include "ccu/fota/ota/inventory_error_codes.hpp"
 
 #include "ccu/fw/hash/sha256.hpp"
 
@@ -34,13 +35,68 @@ std::int64_t nowMs() {
                std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-// wire digest 的规范化域（CCU-FOTA-DSN-CR-012 §规范化）。
-// 变更此字符串或字段布局 = 摘要域版本升级，须同步 golden 向量。
-constexpr const char* kInventoryWireDomain = "inventory-ecu-list-v1";
+// wire digest 的规范化域（CCU-FOTA-DSN-CR-014 D4：升 v2）。
+// 变更此字符串或字段布局 = 摘要域版本升级，须同步 golden 向量与 inventory v3 迁移。
+// 域常量集中在 fingerprint 模块（fingerprint::WIRE_DOMAIN），避免第二套常量。
+constexpr const char* kInventoryWireDomain = fingerprint::WIRE_DOMAIN;
 
 // CanonicalEncoder::finalize() 的结果转 ByteView（sha256_hex 入参）。
 ccu::fw::hash::ByteView binaryToView(const std::vector<std::uint8_t>& bytes) {
     return ccu::fw::hash::ByteView{bytes.data(), bytes.size()};
+}
+
+// 稳定排序键（CCU-FOTA-DSN-CR-014 D4），与 fingerprint 模块一致。
+struct EcuOrderKey {
+    std::string ecuId;
+    std::string partNumber;
+    std::string softwarePartNumber;
+    std::string swVersion;
+    std::string hwVersion;
+
+    bool operator<(const EcuOrderKey& o) const {
+        return std::tie(ecuId, partNumber, softwarePartNumber, swVersion,
+                        hwVersion) <
+               std::tie(o.ecuId, o.partNumber, o.softwarePartNumber,
+                        o.swVersion, o.hwVersion);
+    }
+    bool operator==(const EcuOrderKey& o) const {
+        return std::tie(ecuId, partNumber, softwarePartNumber, swVersion,
+                        hwVersion) ==
+               std::tie(o.ecuId, o.partNumber, o.softwarePartNumber,
+                        o.swVersion, o.hwVersion);
+    }
+};
+
+EcuOrderKey orderKeyOf(const EcuVersionEntry& e) {
+    return EcuOrderKey{e.ecu_id,
+                       e.part_number.value_or(""),
+                       e.software_part_number.value_or(""),
+                       e.sw_version.value_or(""),
+                       e.hw_version.value_or("")};
+}
+
+// SINGLE_IMAGE 必需事实前置校验（CCU-FOTA-DSN-CR-014 D3）。
+// 返回 true 表示可上报；失败时 errorDetail 只含字段名与 ECU 索引，
+// 不输出件号、版本或 VIN 原值。
+bool validateRequiredFacts(const std::vector<EcuVersionEntry>& ecus,
+                           std::string& errorDetail) {
+    for (std::size_t i = 0; i < ecus.size(); ++i) {
+        const auto prefix = "ecuList[" + std::to_string(i) + "].";
+        if (ecus[i].ecu_id.empty()) {
+            errorDetail = prefix + "ecuId";
+            return false;
+        }
+        if (!ecus[i].software_part_number.has_value() ||
+            ecus[i].software_part_number->empty()) {
+            errorDetail = prefix + "softwarePartNumber";
+            return false;
+        }
+        if (!ecus[i].sw_version.has_value() || ecus[i].sw_version->empty()) {
+            errorDetail = prefix + "swVersion";
+            return false;
+        }
+    }
+    return true;
 }
 } // namespace
 
@@ -72,66 +128,89 @@ CollectedInventory InventoryProviderFromAssembler::collectInventory() {
 
     info.baselineCode = snap.baseline_id.value_or("");
 
+    // ------------------------------------------------------------------
+    // SINGLE_IMAGE 必需事实前置校验（CR-014 D3）：必须在排序、摘要与 Proto
+    // 构造之前完成；任一 ECU 缺失则整份清单不可上报。
+    // ------------------------------------------------------------------
+    {
+        std::string detail;
+        if (!validateRequiredFacts(snap.ecu_list, detail)) {
+            info.collected = false;
+            info.collectionErrorCode =
+                ota::inventory_error::kRequiredFactMissing;
+            info.collectionErrorDetail = std::move(detail);
+            return info;
+        }
+    }
+
     // ---------------------------------------------------------------
-    // 稳定排序 (CR-012 §规范化)：ecuId -> hardware -> software part -> swVersion。
-    // 排序后同时用于 wire ecuList、wire digest 与本地版本指纹，避免 DIAG 返回顺序
-    // 抖动导致 digest 漂移。
+    // 稳定排序（CR-014 D4）：
+    // (ecuId, partNumber, softwarePartNumber, swVersion, hwVersion)
+    // 完整键重复 -> fail-closed（不以输入顺序兜底）。
     // ---------------------------------------------------------------
     std::vector<const EcuVersionEntry*> ordered;
     ordered.reserve(snap.ecu_list.size());
     for (const auto& e : snap.ecu_list) ordered.push_back(&e);
     std::sort(ordered.begin(), ordered.end(),
               [](const EcuVersionEntry* a, const EcuVersionEntry* b) {
-                  return std::make_tuple(a->ecu_id,
-                                         a->hw_version.value_or(""),
-                                         a->part_number.value_or(""),
-                                         a->sw_version.value_or("")) <
-                         std::make_tuple(b->ecu_id,
-                                         b->hw_version.value_or(""),
-                                         b->part_number.value_or(""),
-                                         b->sw_version.value_or(""));
+                  return orderKeyOf(*a) < orderKeyOf(*b);
               });
+    for (std::size_t i = 1; i < ordered.size(); ++i) {
+        if (orderKeyOf(*ordered[i - 1]) == orderKeyOf(*ordered[i])) {
+            info.collected = false;
+            info.collectionErrorCode = "CCU-FOTA-2001";
+            info.collectionErrorDetail =
+                "duplicate ECU stable key: ecuList[" + std::to_string(i) + "]";
+            return info;
+        }
+    }
 
     std::vector<std::vector<std::uint8_t>> canonItems;
     canonItems.reserve(ordered.size());
     info.ecuList.reserve(ordered.size());
     for (const auto* e : ordered) {
-        if (e->ecu_id.empty()) continue;
         ::vehicle::fota::v1::EcuVersion ev;
+        // CR-014 D2：四类字段一一对应，禁止跨字段赋值（总成号/软件号/硬件版本）。
         ev.set_ecu_id(e->ecu_id);
-        if (e->hw_version) ev.set_hardware_part_number(*e->hw_version);
-        if (e->part_number) ev.set_software_part_number(*e->part_number);
+        if (e->part_number) ev.set_hardware_part_number(*e->part_number);
+        if (e->software_part_number)
+            ev.set_software_part_number(*e->software_part_number);
         if (e->sw_version) ev.set_sw_version(*e->sw_version);
+        if (e->hw_version) ev.set_hw_version(*e->hw_version);
         info.ecuList.push_back(std::move(ev));
 
         fingerprint::CanonicalEncoder sub("");
         sub.writeStringField(0x0001, e->ecu_id);
-        sub.writeOptionalStringField(0x0002, e->hw_version);
-        sub.writeOptionalStringField(0x0003, e->part_number);
+        sub.writeOptionalStringField(0x0002, e->part_number);
+        sub.writeOptionalStringField(0x0003, e->software_part_number);
         sub.writeOptionalStringField(0x0004, e->sw_version);
+        sub.writeOptionalStringField(0x0005, e->hw_version);
         canonItems.push_back(sub.finalize());
     }
 
     try {
-        // wire digest：独立版本化的 wire 规范化域 inventory-ecu-list-v1。
+        // wire digest：独立版本化的 wire 规范化域 inventory-ecu-list-v2。
         fingerprint::CanonicalEncoder wire(kInventoryWireDomain);
         wire.writeListField(0x0001, canonItems);
         info.ecuListDigest.set_algorithm("sha-256");
         info.ecuListDigest.set_value_hex(
             ccu::fw::hash::sha256_hex(binaryToView(wire.finalize())));
 
-        // 本地内容变化判据：versionFingerprint（cgw-fota-version-v1，CR-006）。
+        // 本地内容变化判据：versionFingerprint（cgw-fota-version-v2，CR-014）。
         auto fp = fingerprint::buildVersionFingerprint(snap);
         info.fingerprintCanonicalization = fp.canonicalization;
         info.fingerprintHex = fp.hex();
     } catch (const std::exception&) {
-        // 规范化/摘要失败 -> fail-closed（不产生空摘要、不上报）。
+        // 规范化/摘要失败（含重复稳定键）-> fail-closed（不产生空摘要、不上报）。
         info = CollectedInventory{};
         info.fotaMasterVersion = fotaMasterVersion_;
         info.collectedAtMs = nowMs();
+        info.collectionErrorCode = "CCU-FOTA-2001";
+        info.collectionErrorDetail = "canonicalization failed";
         return info;
     }
 
+    info.wireCanonicalization = kInventoryWireDomain;
     info.collected = true;
     return info;
 }

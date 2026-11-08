@@ -63,7 +63,8 @@ inline std::string logJobKey(const std::string& logRequestId) { return LOG_JOBS_
 namespace schema {
 constexpr std::uint32_t VEHICLE_TASK_VERSION = 1;
 // CR-012: v2 引入清单身份字段（status/acceptedRevision/fingerprint/retry）。
-constexpr std::uint32_t INVENTORY_VERSION    = 2;
+// CR-014: v3 引入 wireCanonicalization（wire 摘要域），防止跨 wire 版本复用身份。
+constexpr std::uint32_t INVENTORY_VERSION    = 3;
 constexpr std::uint32_t CONSENT_VERSION      = 1;
 constexpr std::uint32_t DOWNLOADS_VERSION    = 1;
 // CR-013: v2 引入安装结果登记标识（installedVersionRegistrationId）。
@@ -113,8 +114,11 @@ struct FotaInventoryRecord {
     std::string   requiredMode;             // "" / FULL / DIGEST（来自云端回执）
     std::string   algorithm;
     std::string   ecuListDigestHex;
-    std::string   fingerprintCanonicalization;   // cgw-fota-version-v1
+    std::string   fingerprintCanonicalization;   // cgw-fota-version-v2
     std::string   fingerprintHex;                // 空 = 身份不可用（旧格式）
+    // CR-014 D5：wire ecuListDigest 的规范化域（inventory-ecu-list-v2）。
+    // v1/v2 记录迁移时回填 inventory-ecu-list-v1；跨域不得复用/重放身份。
+    std::string   wireCanonicalization;
     std::string   baselineCode;
     std::string   fotaMasterVersion;
     Timestamp     collectedAtMs = 0;

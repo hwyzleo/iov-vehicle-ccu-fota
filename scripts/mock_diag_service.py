@@ -41,11 +41,15 @@ MOCK_REGISTRY_VERSION = "1.0.0"
 
 # 开发夹具清单（准权威在 CCU-DIAG: EcuInventoryStore + seed；本文件仅本地联调）。
 # FOTA 侧不持有任何清单常量，全部内容来自本响应。
+# CCU-FOTA-DSN-CR-014：payload v2 独立表达总成件号、软件件号、序列号与版本，
+# 四类字段取值互不相同，便于验证逐字段映射（旧 v1 无软件件号将被 FOTA 拒绝上报）。
 MOCK_INVENTORY_ECUS = [
-    {"ecuId": "BMS", "partNumber": "PN-BMS-DEV", "swVersion": "1.0.0",
-     "hwVersion": "HW-BMS-DEV", "source": "UDS_0x22", "status": "OK", "errorCode": ""},
-    {"ecuId": "VCU", "partNumber": "PN-VCU-DEV", "swVersion": "1.0.0",
-     "hwVersion": "HW-VCU-DEV", "source": "SOMEIP_GET_VERSION", "status": "OK", "errorCode": ""},
+    {"ecuId": "BMS", "partNumber": "PN-BMS-DEV", "softwarePartNumber": "SW-PN-BMS-DEV",
+     "serialNumber": "SN-BMS-DEV", "swVersion": "1.0.0", "hwVersion": "HW-BMS-DEV",
+     "source": "UDS_0x22", "status": "OK", "errorCode": ""},
+    {"ecuId": "VCU", "partNumber": "PN-VCU-DEV", "softwarePartNumber": "SW-PN-VCU-DEV",
+     "serialNumber": "SN-VCU-DEV", "swVersion": "1.0.0", "hwVersion": "HW-VCU-DEV",
+     "source": "SOMEIP_GET_VERSION", "status": "OK", "errorCode": ""},
 ]
 
 # 登记幂等环（executionId:attemptNo -> registrationId），模拟 DIAG 侧去重。
@@ -123,10 +127,11 @@ def handle_request(data, client_address):
     
     elif method_id == METHOD_COLLECT_VEHICLE_INVENTORY:
         print(f"[HANDLER] COLLECT_VEHICLE_INVENTORY request", flush=True)
-        # payload v1（CCU-DIAG-DSN-CR-010 冻结）：必须含 ecuList 逐 ECU 明细；
-        # 失败时返回非 0 return code（不得“成功 + 空清单”）。
+        # payload v2（CCU-FOTA-DSN-CR-014 / CCU-DIAG-DSN-CR-012）：必须含 ecuList
+        # 逐 ECU 明细与独立 softwarePartNumber；失败时返回非 0 return code
+        # （不得“成功 + 空清单”）。
         response = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "inventorySource": "seed",
             "vin": MOCK_VIN,
             "vinSource": "PROVISIONED",

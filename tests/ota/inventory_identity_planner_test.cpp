@@ -44,15 +44,17 @@ CollectedInventory makeInventory(const std::string& contentTag,
     CollectedInventory inv;
     ::vehicle::fota::v1::EcuVersion e;
     e.set_ecu_id("VCU-001");
-    e.set_hardware_part_number("P-VCU-001");
-    e.set_software_part_number("S-VCU-001");
+    e.set_hardware_part_number("HT-VCU-001");       // 总成件号
+    e.set_software_part_number("SW-VCU-001");       // 软件件号（CR-014）
     e.set_sw_version(swVersion);
+    e.set_hw_version("HWV-VCU-001");                 // 硬件版本
     inv.ecuList.push_back(e);
     inv.baselineCode = "BASE-001";
     inv.fotaMasterVersion = "1.0.0";
     inv.collectedAtMs = 1000;
-    inv.fingerprintCanonicalization = "cgw-fota-version-v1";
+    inv.fingerprintCanonicalization = "cgw-fota-version-v2";
     inv.fingerprintHex = ccu::fw::hash::sha256_hex("fp|" + contentTag);
+    inv.wireCanonicalization = "inventory-ecu-list-v2";
     inv.ecuListDigest.set_algorithm("sha-256");
     inv.ecuListDigest.set_value_hex(ccu::fw::hash::sha256_hex("digest|" + contentTag));
     inv.collected = true;
@@ -419,6 +421,9 @@ TEST(InventoryIdentityPlanner, LegacyRecordTreatedAsIdentityUnavailable) {
     EXPECT_TRUE(loaded->fingerprintHex.empty());
     EXPECT_EQ(loaded->status, "REQUIRED_FULL");
     EXPECT_EQ(loaded->inventoryRevision, 7u);
+    // CR-014 D5：迁移回填历史 wire 域，不伪造新域、不重算摘要。
+    EXPECT_EQ(loaded->wireCanonicalization, "inventory-ecu-list-v1");
+    EXPECT_EQ(loaded->schemaVersion, ccu_fota::store::fota::schema::INVENTORY_VERSION);
 
     auto id = h.planner->resolve(makeInventory("v1"));
     EXPECT_EQ(id.reason, InventoryChangeReason::FirstBaseline);
@@ -426,6 +431,84 @@ TEST(InventoryIdentityPlanner, LegacyRecordTreatedAsIdentityUnavailable) {
     auto rec = h.planner->markPrepared(makeInventory("v1"), id);
     EXPECT_EQ(rec.inventoryRevision, 8u);   // 序号继续递增，不回退
     EXPECT_EQ(highestSeq(*h.fotaStore), 8u);
+    // 新身份使用 v2 域。
+    EXPECT_EQ(rec.fingerprintCanonicalization, "cgw-fota-version-v2");
+    EXPECT_EQ(rec.wireCanonicalization, "inventory-ecu-list-v2");
+}
+
+// ---------------------------------------------------------------------------
+// CR-014 D5/D6：仅 wire 域不同（fingerprint 域相同、内容相同）也必须
+// 建立一次新 revision + FULL，并被接受后收敛到 DIGEST；不得跨域重放。
+// ---------------------------------------------------------------------------
+TEST(InventoryIdentityPlanner, WireDomainMismatchCreatesOneNewRevisionThenReuses) {
+    PlannerHarness h;
+
+    // 1) 旧 v1 域下的已接受身份（CR-012 persisted 形态）。
+    CollectedInventory legacyInv = makeInventory("same-content");
+    legacyInv.fingerprintCanonicalization = "cgw-fota-version-v1";
+    legacyInv.wireCanonicalization = "inventory-ecu-list-v1";
+    auto legacyId = h.planner->resolve(legacyInv);
+    EXPECT_TRUE(legacyId.freshRevision);
+    auto legacyRec = h.planner->markPrepared(legacyInv, legacyId);
+    ASSERT_EQ(legacyRec.inventoryRevision, 1u);
+    ::vehicle::fota::v1::TaskCheckResponse accepted;
+    accepted.set_inventory_disposition(
+        ::vehicle::fota::v1::INVENTORY_DISPOSITION_ACCEPTED);
+    h.planner->onAccepted(legacyId, accepted);
+    ASSERT_EQ(h.planner->current()->status, "ACCEPTED");
+    EXPECT_EQ(h.allocCalls, 1u);
+
+    // 2) 升级到 v2 域（内容指纹相同）：不得复用旧身份 -> 一次新 revision + FULL。
+    auto invV2 = makeInventory("same-content");  // v2 域常量
+    auto idV2 = h.planner->resolve(invV2);
+    EXPECT_EQ(idV2.reason, InventoryChangeReason::FirstBaseline);
+    EXPECT_TRUE(idV2.freshRevision);
+    EXPECT_EQ(idV2.mode, INVENTORY_MODE_FULL);
+    auto recV2 = h.planner->markPrepared(invV2, idV2);
+    EXPECT_EQ(recV2.inventoryRevision, 2u);
+    EXPECT_EQ(h.allocCalls, 2u);
+    h.planner->onAccepted(idV2, accepted);
+
+    // 3) 连续周期内容与双域不变：收敛 DIGEST，不再增长。
+    auto idAgain = h.planner->resolve(makeInventory("same-content"));
+    EXPECT_EQ(idAgain.reason, InventoryChangeReason::ContentReused);
+    EXPECT_FALSE(idAgain.freshRevision);
+    EXPECT_EQ(idAgain.mode, INVENTORY_MODE_DIGEST);
+    EXPECT_EQ(idAgain.revision, 2u);
+    EXPECT_EQ(h.allocCalls, 2u);
+}
+
+// ---------------------------------------------------------------------------
+// CR-014 D5：旧 PREPARED 请求（旧域）不得跨域原样重放；
+// 新域下重建立身份时 requestPbHex 被清空（由 orchestrator 重新写入）。
+// ---------------------------------------------------------------------------
+TEST(InventoryIdentityPlanner, OldPreparedRequestNotReplayedAcrossDomains) {
+    PlannerHarness h;
+
+    FotaInventoryRecord legacy;
+    legacy.status = "PREPARED";
+    legacy.mode = "FULL";
+    legacy.inventoryRevision = 5;
+    legacy.algorithm = "sha-256";
+    legacy.ecuListDigestHex = std::string(64, 'a');
+    // 旧实现（CR-012）持久化的内容指纹，与当前内容相同；但双域均为 v1。
+    legacy.fingerprintCanonicalization = "cgw-fota-version-v1";
+    legacy.fingerprintHex = makeInventory("v1").fingerprintHex;
+    legacy.wireCanonicalization = "inventory-ecu-list-v1";
+    legacy.requestPbHex = "deadbeef";
+    legacy.attempt = 3;
+    h.cloudStore->saveInventory(legacy);
+    for (int i = 0; i < 5; ++i) h.fotaStore->allocateSnapshotSeq();
+
+    auto inv = makeInventory("v1");
+    auto id = h.planner->resolve(inv);
+    EXPECT_TRUE(id.freshRevision);
+    EXPECT_EQ(id.mode, INVENTORY_MODE_FULL);
+    auto rec = h.planner->markPrepared(inv, id);
+    EXPECT_EQ(rec.inventoryRevision, 6u);          // 新 revision，不回退也不复用 5
+    EXPECT_TRUE(rec.requestPbHex.empty());         // 旧请求不得跨域重放
+    EXPECT_EQ(rec.wireCanonicalization, "inventory-ecu-list-v2");
+    EXPECT_EQ(rec.fingerprintCanonicalization, "cgw-fota-version-v2");
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,9 @@ public:
 
         EcuVersionEntry entry1;
         entry1.ecu_id = "ECU001";
-        entry1.part_number = "PN001";
+        // CR-014：四类件号/版本字段取互不相同的值，避免夹具固化旧交叉映射。
+        entry1.part_number = "PN001";                  // 总成件号
+        entry1.software_part_number = "SPN001";        // 软件件号
         entry1.sw_version = "1.0.0";
         entry1.hw_version = "HW1.0";
         entry1.source = VersionSource::UDS_0x22;

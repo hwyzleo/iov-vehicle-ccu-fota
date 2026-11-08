@@ -1,9 +1,9 @@
 // =============================================================================
 // tests/test_inventory_fingerprint.cpp
-// CCU-FOTA 业务摘要单元测试 (CCU-FOTA-DSN-CR-006 §10.1-10.5 / §测试设计)
-// 覆盖：golden digest（与独立 Python 参考实现互校）、ECU 排序扰动、字段参与/排除、
-//       snapshot 稳定性、identifierDigest 域隔离与归一化、dedupeKey、重复稳定键
-//       fail-closed、指纹格式。
+// CCU-FOTA 业务摘要单元测试 (CCU-FOTA-DSN-CR-006 §10.1-10.5
+//                                / CCU-FOTA-DSN-CR-014 D4 / §测试设计)
+// 覆盖：v2 golden digest（与 scripts/golden_fingerprint.py 互校）、ECU 排序扰动、
+//       字段参与/排除、全键重复 fail-closed、serialNumber 不参与内容身份。
 // =============================================================================
 
 #include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
@@ -18,7 +18,8 @@ using namespace ccu_fota::fingerprint;
 
 namespace {
 
-// 与 /tmp/golden_fingerprint.py 完全一致的固定快照（golden 来源）。
+// 与 scripts/golden_fingerprint.py 完全一致的固定快照（golden 来源）。
+// CR-014 D4：总成件号与软件件号取不同值，硬件版本独立。
 VehicleSoftwareSnapshot makeGoldenSnapshot() {
     VehicleSoftwareSnapshot s;
     s.vin = "LSJAAAAAAAAAAAAAA";
@@ -33,6 +34,7 @@ VehicleSoftwareSnapshot makeGoldenSnapshot() {
     EcuVersionEntry e1;
     e1.ecu_id = "ECU1";
     e1.part_number = "P001";
+    e1.software_part_number = "SP001";
     e1.sw_version = "1.2.3";
     e1.hw_version = "HW1";
     e1.source = VersionSource::UDS_0x22;
@@ -41,6 +43,7 @@ VehicleSoftwareSnapshot makeGoldenSnapshot() {
     EcuVersionEntry e2;
     e2.ecu_id = "ECU2";
     e2.part_number = "P002";
+    e2.software_part_number = "SP002";
     e2.sw_version = "2.0";
     e2.source = VersionSource::SOMEIP_GET_VERSION;
     e2.status = EcuStatus::OK;
@@ -60,24 +63,26 @@ bool isLowerHex64(const std::string& s) {
 } // namespace
 
 // ===========================================================================
-// Golden digest（独立 Python 参考实现互校验）
+// Golden digest（与 scripts/golden_fingerprint.py 参考实现互校，CR-014 v2）
 // ===========================================================================
 TEST(InventoryFingerprintTest, VersionFingerprintGolden) {
     auto s = makeGoldenSnapshot();
     Fingerprint fp = buildVersionFingerprint(s);
     EXPECT_EQ(fp.algorithm, "sha-256");
+    EXPECT_EQ(fp.canonicalization, "cgw-fota-version-v2");
     EXPECT_EQ(fp.canonicalization, VERSION_DOMAIN);
     EXPECT_TRUE(isLowerHex64(fp.hex()));
-    EXPECT_EQ(fp.hex(), "2a863b8ec731ff205006b4aa712606cbaca56d00a36348106acf5254aebdfcf0");
+    EXPECT_EQ(fp.hex(), "b3b8b6ac8fc396ff40c23b0dcce7796787f6ab9bc6455347977dfacf6b43352d");
 }
 
 TEST(InventoryFingerprintTest, SnapshotFingerprintGolden) {
     auto s = makeGoldenSnapshot();
     Fingerprint fp = buildSnapshotFingerprint(s);
     EXPECT_EQ(fp.algorithm, "sha-256");
+    EXPECT_EQ(fp.canonicalization, "cgw-fota-snapshot-v2");
     EXPECT_EQ(fp.canonicalization, SNAPSHOT_DOMAIN);
     EXPECT_TRUE(isLowerHex64(fp.hex()));
-    EXPECT_EQ(fp.hex(), "525192dc0b08b947123b3364e0ee2c4b49a39c81563d73fecb553f49cb87371b");
+    EXPECT_EQ(fp.hex(), "f862daf06d1e979eaaa4046f99520415b6f275b0f8b95aa8aecd2ecf349807f2");
 }
 
 TEST(InventoryFingerprintTest, DedupeKeyGolden) {
@@ -85,7 +90,15 @@ TEST(InventoryFingerprintTest, DedupeKeyGolden) {
     Fingerprint sf = buildSnapshotFingerprint(s);
     std::string key = buildDedupeKey(sf, DESTINATION_TBOX_SOFTWARE_INVENTORY);
     EXPECT_TRUE(isLowerHex64(key));
-    EXPECT_EQ(key, "cb06b60e7425cf987c936350e5ac9f2f882015b85544636d57f33ba11aabe7c3");
+    EXPECT_EQ(key, "879ae459ecb30a4e4d626310a50da562ec9c1e8bf2bcb69963ff135bf5697ad6");
+}
+
+// 域版本升级后旧 v1 常量仅用于迁移识别，不得与新域混淆
+TEST(InventoryFingerprintTest, LegacyDomainConstantsAreDistinct) {
+    EXPECT_NE(std::string(VERSION_DOMAIN), std::string(VERSION_DOMAIN_V1));
+    EXPECT_NE(std::string(SNAPSHOT_DOMAIN), std::string(SNAPSHOT_DOMAIN_V1));
+    EXPECT_NE(std::string(WIRE_DOMAIN), std::string(WIRE_DOMAIN_V1));
+    EXPECT_EQ(std::string(DEDUPE_DOMAIN), "cgw-fota-dedupe-v1");
 }
 
 TEST(InventoryFingerprintTest, IdentifierDigestVinGolden) {
@@ -150,7 +163,7 @@ TEST(InventoryFingerprintTest, EcuOrderingPerturbation) {
 }
 
 // ===========================================================================
-// versionFingerprint 字段敏感性：版本字段变化必然改变指纹
+// versionFingerprint 字段敏感性：件号/版本字段变化必然改变指纹
 // ===========================================================================
 TEST(InventoryFingerprintTest, VersionFieldSensitivity) {
     auto s = makeGoldenSnapshot();
@@ -167,6 +180,37 @@ TEST(InventoryFingerprintTest, VersionFieldSensitivity) {
     auto s4 = s;
     s4.baseline_id = "bl-002";
     EXPECT_NE(buildVersionFingerprint(s4).hex(), base);
+
+    // CR-014 D4：独立软件件号参与内容身份（与总成件号不可混用）
+    auto s5 = s;
+    s5.ecu_list[0].software_part_number = "SP999";
+    EXPECT_NE(buildVersionFingerprint(s5).hex(), base);
+
+    auto s6 = s;
+    s6.ecu_list[0].part_number = "P999";
+    EXPECT_NE(buildVersionFingerprint(s6).hex(), base);
+
+    auto s7 = s;
+    s7.ecu_list[0].hw_version = "HW9";
+    EXPECT_NE(buildVersionFingerprint(s7).hex(), base);
+}
+
+// ===========================================================================
+// 软件件号缺失 vs 总成件号不同值：产生不同内容身份（不得交叉嵌套）
+// ===========================================================================
+TEST(InventoryFingerprintTest, SoftwarePartNumberNotBackfilledByPartNumber) {
+    auto s = makeGoldenSnapshot();
+    std::string base = buildVersionFingerprint(s).hex();
+
+    auto missing = s;
+    missing.ecu_list[0].software_part_number.reset();
+    EXPECT_NE(buildVersionFingerprint(missing).hex(), base);
+
+    // 若实现错把 partNumber 当作软件件号，下面两种输入会产生相同摘要。
+    auto swapped = s;
+    swapped.ecu_list[0].software_part_number = "P001";
+    swapped.ecu_list[0].part_number = "SP001";
+    EXPECT_NE(buildVersionFingerprint(swapped).hex(), base);
 }
 
 // ===========================================================================
@@ -255,7 +299,8 @@ TEST(InventoryFingerprintTest, DedupeKeyProperties) {
 }
 
 // ===========================================================================
-// 重复稳定键：相同 (ecuId, partNumber, swVersion) -> CanonicalError (fail-closed)
+// 完整稳定键重复：(ecuId, partNumber, softwarePartNumber, swVersion, hwVersion)
+// 全部相同时 fail-closed（仅 hwVersion 不同则不是重复，且改变摘要）
 // ===========================================================================
 TEST(InventoryFingerprintTest, DuplicateEcuStableKeyFails) {
     auto s = makeGoldenSnapshot();
@@ -264,14 +309,22 @@ TEST(InventoryFingerprintTest, DuplicateEcuStableKeyFails) {
     EcuVersionEntry a;
     a.ecu_id = "ECU1";
     a.part_number = "P1";
+    a.software_part_number = "SP1";
     a.sw_version = "1";
     a.hw_version = "HW1";
-    EcuVersionEntry b = a;
-    b.hw_version = "HW2";  // 仅硬件版本不同，稳定键仍重复
+    EcuVersionEntry b = a;  // 完整稳定键完全相同
     s.ecu_list = {a, b};
 
     EXPECT_THROW(buildVersionFingerprint(s), CanonicalError);
     EXPECT_THROW(buildSnapshotFingerprint(s), CanonicalError);
+
+    // 仅硬件版本不同 => 完整键不同 => 合法，且改变摘要（CR-014 新排序键）
+    auto s2 = s;
+    s2.ecu_list[1].hw_version = "HW2";
+    EXPECT_NO_THROW(buildVersionFingerprint(s2));
+    s2.ecu_list[1].hw_version = "HW1";
+    s2.ecu_list[1].software_part_number = "SP2";
+    EXPECT_NO_THROW(buildVersionFingerprint(s2));
 }
 
 // ===========================================================================

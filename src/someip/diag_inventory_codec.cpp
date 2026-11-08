@@ -169,8 +169,10 @@ bool parseEcuStatus(std::string_view raw, EcuStatus& out) {
 }
 
 // 解码单个 ECU 条目；失败细节定位到 ecuList[<index>].<field>（不含值）。
-bool decodeEcuEntry(const json& item, std::size_t index, EcuVersionEntry& entry,
-                    std::string& err) {
+// payloadV2 为 true 时才解码独立 softwarePartNumber（CR-014 D1）：v1 冻结字段集
+// 不含该字段，因此即使对端意外提供也不读取，保证不产生跨版本兜底语义。
+bool decodeEcuEntry(const json& item, std::size_t index, bool payloadV2,
+                    EcuVersionEntry& entry, std::string& err) {
     const std::string prefix = "ecuList[" + std::to_string(index) + "].";
     if (!item.is_object()) {
         err = prefix + "not an object";
@@ -188,6 +190,20 @@ bool decodeEcuEntry(const json& item, std::size_t index, EcuVersionEntry& entry,
     if (!getOptionalString(item, {"partNumber", "part_number"},
                            entry.part_number, (prefix + "partNumber").c_str(), err)) {
         return false;
+    }
+    if (payloadV2 &&
+        !getOptionalString(item, {"softwarePartNumber", "software_part_number"},
+                           entry.software_part_number,
+                           (prefix + "softwarePartNumber").c_str(), err)) {
+        return false;
+    }
+    // serialNumber 是 ECU 实例身份，不属于任何件号字段（CR-014 US-040）。
+    // 只做类型校验，不写入 DTO、不参与摘要。
+    if (const json* sn = findField(item, {"serialNumber", "serial_number"})) {
+        if (!sn->is_string()) {
+            err = prefix + "field type mismatch (expected string): serialNumber";
+            return false;
+        }
     }
     if (!getOptionalString(item, {"swVersion", "sw_version"},
                            entry.sw_version, (prefix + "swVersion").c_str(), err)) {
@@ -269,10 +285,12 @@ DiagInventoryDecodeResult DiagInventoryCodec::decode(std::string_view payload) {
                            "schemaVersion");
         }
     }
-    if (schemaVersion != kSupportedSchemaVersion) {
+    if (schemaVersion != kSchemaVersionV1 &&
+        schemaVersion != kSchemaVersionV2) {
         return invalid(ota::inventory_error::kDiagPayloadInvalid,
                        "unsupported schemaVersion: " + schemaVersion);
     }
+    const bool payloadV2 = schemaVersion == kSchemaVersionV2;
 
     DiagInventoryDecodeResult out;
     out.snapshot.schema_version = schemaVersion;
@@ -365,7 +383,7 @@ DiagInventoryDecodeResult DiagInventoryCodec::decode(std::string_view payload) {
     std::size_t index = 0;
     for (const auto& item : *ecuList) {
         EcuVersionEntry entry;
-        if (!decodeEcuEntry(item, index, entry, err)) {
+        if (!decodeEcuEntry(item, index, payloadV2, entry, err)) {
             return invalid(ota::inventory_error::kDiagPayloadInvalid, err);
         }
         // 重复 ecuId 无法稳定表达逐 ECU 事实 -> fail-closed。

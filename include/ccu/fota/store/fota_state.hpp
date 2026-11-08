@@ -107,14 +107,16 @@ bool triggerReasonFromString(const std::string& s, TriggerReason& out);
 // PersistedFingerprints - 持久化指纹记录 (CCU-FOTA-DSN-CR-006 §10.6)
 // ============================================================
 // algorithm 为空表示未知/遗留（不可比较）；非空时必须为 "sha-256"。
-// canonicalization 为快照规范化域（cgw-fota-snapshot-v1），作为记录级版本标记；
-// versionFingerprintHex 隐含 cgw-fota-version-v1，dedupeKeyHex 隐含
+// canonicalization 为快照规范化域（cgw-fota-snapshot-v2；v1 记录仍可读），
+// 作为记录级版本标记；versionFingerprintHex 隐含 cgw-fota-version-v2（
+// 实际版本以记录级 canonicalization 为准），dedupeKeyHex 隐含
 // cgw-fota-dedupe-v1。比较前必须先校验 algorithm 与 canonicalization，
-// 版本不匹配不得跨版本直接比较。
+// 版本不匹配不得跨版本直接比较（CR-014 D4）。
 // ============================================================
 struct PersistedFingerprints {
     std::string algorithm;                // "" (unknown) 或 "sha-256"
-    std::string canonicalization;         // "" (unknown) 或 "cgw-fota-snapshot-v1"
+    // "" (unknown) / "cgw-fota-snapshot-v1" / "cgw-fota-snapshot-v2"
+    std::string canonicalization;
     std::string versionFingerprintHex;    // 64 小写 hex 或 "" (unknown)
     std::string snapshotFingerprintHex;   // 64 小写 hex 或 ""
     std::string dedupeKeyHex;             // 64 小写 hex 或 ""

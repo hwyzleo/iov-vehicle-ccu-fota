@@ -19,6 +19,10 @@ namespace inventory_error {
 constexpr const char* kDiagPayloadInvalid = "FOTA-INVENTORY-DIAG-PAYLOAD-INVALID";
 // DIAG 清单为空（ecuList 缺失或空）：不得作为成功清单上报。
 constexpr const char* kDiagListEmpty = "FOTA-INVENTORY-DIAG-LIST-EMPTY";
+// SINGLE_IMAGE 必需事实缺失（ecuId / softwarePartNumber / swVersion 为空）：
+// CCU-FOTA-DSN-CR-014 D3。错误细节只含字段名与 ECU 索引，不含件号或版本原值。
+constexpr const char* kRequiredFactMissing =
+    "FOTA-INVENTORY-REQUIRED-FACT-MISSING";
 // 登记能力不可用（DIAG 不可达 / 传输失败 / 未就绪）。
 constexpr const char* kRegistrationUnavailable =
     "FOTA-INVENTORY-REGISTRATION-UNAVAILABLE";

@@ -10,6 +10,8 @@
 
 #include "vehicle/fota/v1/task.pb.h"
 
+#include <nlohmann/json.hpp>
+
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -337,6 +339,100 @@ TEST(FotaCloudStateSerializerStandalone, ExecutionV1UpgradesWithEmptyRegistratio
     EXPECT_EQ(d.executionId, "EX-V1");
     EXPECT_EQ(d.executionState, "PERMIT_PERSISTED");
     EXPECT_TRUE(d.installedVersionRegistrationId.empty());
+}
+
+// ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-014 D5：fota.inventory schema v3
+// v1/v2 -> v3 迁移保留 revision、accepted 状态、回执、attempt 与 digestFailures；
+// 缺失 wireCanonicalization 回填 inventory-ecu-list-v1，不重算旧摘要。
+// ---------------------------------------------------------------------------
+TEST(FotaCloudStateSerializerStandalone, InventoryV3RoundTrip) {
+    FotaInventoryRecord r;
+    r.status = "ACCEPTED";
+    r.mode = "DIGEST";
+    r.inventoryRevision = 9;
+    r.acceptedInventoryRevision = 9;
+    r.algorithm = "sha-256";
+    r.ecuListDigestHex = std::string(64, 'b');
+    r.fingerprintCanonicalization = "cgw-fota-version-v2";
+    r.fingerprintHex = std::string(64, 'c');
+    r.wireCanonicalization = "inventory-ecu-list-v2";
+    r.baselineCode = "BASE-9";
+    r.attempt = 4;
+    r.digestFailures = 2;
+
+    auto d = decodeInventory(encodeInventory(r));
+    EXPECT_EQ(d.schemaVersion, ccu_fota::store::fota::schema::INVENTORY_VERSION);
+    EXPECT_EQ(d.schemaVersion, 3u);
+    EXPECT_EQ(d.status, "ACCEPTED");
+    EXPECT_EQ(d.inventoryRevision, 9u);
+    EXPECT_EQ(d.acceptedInventoryRevision, 9u);
+    EXPECT_EQ(d.fingerprintCanonicalization, "cgw-fota-version-v2");
+    EXPECT_EQ(d.wireCanonicalization, "inventory-ecu-list-v2");
+    EXPECT_EQ(d.attempt, 4u);
+    EXPECT_EQ(d.digestFailures, 2u);
+}
+
+TEST(FotaCloudStateSerializerStandalone, InventoryV2MigratesToV3WithLegacyWireDomain) {
+    // 手工构造真实的 v2 envelope（无 wireCanonicalization 字段）。
+    using json = nlohmann::json;
+    json v2 = {
+        {"schemaVersion", 2},
+        {"status", "ACCEPTED"},
+        {"mode", "FULL"},
+        {"inventoryRevision", 7},
+        {"acceptedInventoryRevision", 7},
+        {"requiredMode", "DIGEST"},
+        {"algorithm", "sha-256"},
+        {"ecuListDigestHex", std::string(64, 'd')},
+        {"fingerprintCanonicalization", "cgw-fota-version-v1"},
+        {"fingerprintHex", std::string(64, 'e')},
+        {"baselineCode", "BASE-7"},
+        {"fotaMasterVersion", "1.0.0"},
+        {"collectedAtMs", 1234},
+        {"requestPbHex", "cafe"},
+        {"attempt", 3},
+        {"nextRetryAtMs", 0},
+        {"lastErrorCode", ""},
+        {"digestFailures", 1},
+        {"fullRequired", false}};
+    std::string bytes = ccu_fota::store::encodeEnvelope(2, v2.dump());
+
+    auto d = decodeInventory(bytes);
+    EXPECT_EQ(d.schemaVersion, 3u);
+    EXPECT_EQ(d.status, "ACCEPTED");
+    EXPECT_EQ(d.inventoryRevision, 7u);
+    EXPECT_EQ(d.acceptedInventoryRevision, 7u);
+    EXPECT_EQ(d.requiredMode, "DIGEST");
+    EXPECT_EQ(d.fingerprintCanonicalization, "cgw-fota-version-v1");
+    EXPECT_EQ(d.fingerprintHex, std::string(64, 'e'));   // 不重算、不伪造
+    EXPECT_EQ(d.ecuListDigestHex, std::string(64, 'd'));
+    EXPECT_EQ(d.requestPbHex, "cafe");
+    EXPECT_EQ(d.attempt, 3u);
+    EXPECT_EQ(d.digestFailures, 1u);
+    // 缺失 wire 域 => 回填历史 v1 域。
+    EXPECT_EQ(d.wireCanonicalization, "inventory-ecu-list-v1");
+}
+
+TEST(FotaCloudStateSerializerStandalone, InventoryV1MigratesToV3) {
+    FotaInventoryRecord r;
+    r.mode = "FULL";
+    r.inventoryRevision = 4;
+    r.ecuListDigestHex = std::string(64, 'f');
+    r.requestPbHex = "aabb";
+    r.fullRequired = true;
+    std::string bytes = encodeInventory(r);
+    ASSERT_GE(bytes.size(), 8u);
+    bytes[4] = 1; bytes[5] = 0; bytes[6] = 0; bytes[7] = 0;
+
+    auto d = decodeInventory(bytes);
+    EXPECT_EQ(d.schemaVersion, 3u);
+    EXPECT_EQ(d.inventoryRevision, 4u);
+    EXPECT_EQ(d.status, "REQUIRED_FULL");
+    EXPECT_EQ(d.requestPbHex, "aabb");
+    EXPECT_TRUE(d.fingerprintHex.empty());   // v1 无指纹，不得伪造
+    EXPECT_TRUE(d.fingerprintCanonicalization.empty());
+    EXPECT_EQ(d.wireCanonicalization, "inventory-ecu-list-v1");
 }
 
 // ---------------------------------------------------------------------------

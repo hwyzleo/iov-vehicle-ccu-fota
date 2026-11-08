@@ -83,10 +83,13 @@ InventoryIdentity InventoryIdentityPlanner::resolve(const CollectedInventory& in
 
     auto rec = store_.loadInventory();
 
-    // 规则 1：无记录 / 身份不可用（旧格式、指纹缺失或 canonicalization 版本不同）
-    // -> FULL + 新 revision（建立基线）。不跨版本比较指纹（§10.6）。
+    // 规则 1：无记录 / 身份不可用（旧格式、指纹缺失或任一规范化域版本不同）
+    // -> FULL + 新 revision（建立基线）。不跨版本比较指纹（§10.6 / CR-014 D5）。
+    // 同时校验 fingerprintCanonicalization 与 wireCanonicalization：任一域不同
+    // 均不得跨版本比较或重放旧 requestPbHex。
     if (!rec.has_value() || rec->fingerprintHex.empty() ||
-        rec->fingerprintCanonicalization != inv.fingerprintCanonicalization) {
+        rec->fingerprintCanonicalization != inv.fingerprintCanonicalization ||
+        rec->wireCanonicalization != inv.wireCanonicalization) {
         id.mode = ::vehicle::fota::v1::INVENTORY_MODE_FULL;
         id.reason = InventoryChangeReason::FirstBaseline;
         id.freshRevision = true;
@@ -191,6 +194,8 @@ InventoryIdentityPlanner::markPrepared(const CollectedInventory& inv,
     rec.ecuListDigestHex = id.digestHex;
     rec.fingerprintCanonicalization = inv.fingerprintCanonicalization;
     rec.fingerprintHex = inv.fingerprintHex;
+    // CR-014 D5：wire 摘要域随身份 durable 保存，供下次决策比对。
+    rec.wireCanonicalization = inv.wireCanonicalization;
     rec.baselineCode = inv.baselineCode;
     rec.fotaMasterVersion = inv.fotaMasterVersion;
     rec.collectedAtMs = inv.collectedAtMs;

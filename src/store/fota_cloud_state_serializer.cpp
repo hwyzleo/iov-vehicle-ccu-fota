@@ -5,6 +5,8 @@
 
 #include "ccu/fota/store/fota_cloud_state_serializer.hpp"
 #include "ccu/fota/store/fota_state_serializer.hpp"  // FTSE envelope 复用
+// CR-014 D5：inventory v3 迁移需回填历史 wire 域常量（inventory-ecu-list-v1）。
+#include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -125,6 +127,7 @@ std::string encodeInventory(const FotaInventoryRecord& r) {
         {"ecuListDigestHex", r.ecuListDigestHex},
         {"fingerprintCanonicalization", r.fingerprintCanonicalization},
         {"fingerprintHex", r.fingerprintHex},
+        {"wireCanonicalization", r.wireCanonicalization},
         {"baselineCode", r.baselineCode},
         {"fotaMasterVersion", r.fotaMasterVersion},
         {"collectedAtMs", r.collectedAtMs},
@@ -137,10 +140,11 @@ std::string encodeInventory(const FotaInventoryRecord& r) {
     return encodeEnvelope(r.schemaVersion, j.dump());
 }
 
-// fota.inventory v1 -> v2 迁移（CCU-FOTA-DSN-CR-012 §迁移）。
-// v1 无 status/fingerprint：旧实现只在云端拒绝时写入且 fullRequired=true。
-// 迁移后 fingerprintHex 为空 => 身份不可用 => 下一次检测保守 FULL 建基线，
-// 但保留已分配 revision（不回退、不清零）。
+// fota.inventory v1 -> v3 迁移（CCU-FOTA-DSN-CR-012 §迁移 / CR-014 D5）。
+// v1 无 status/fingerprint/wireCanonicalization：旧实现只在云端拒绝时写入且
+// fullRequired=true。迁移后 fingerprintHex 为空 => 身份不可用 => 下一次检测保守
+// FULL 建基线，但保留已分配 revision（不回退、不清零）；
+// wireCanonicalization 回填 inventory-ecu-list-v1（不重算旧摘要）。
 FotaInventoryRecord decodeInventoryV1(const json& j) {
     FotaInventoryRecord r;
     r.schemaVersion = schema::INVENTORY_VERSION;
@@ -156,6 +160,7 @@ FotaInventoryRecord decodeInventoryV1(const json& j) {
     r.status = r.fullRequired ? "REQUIRED_FULL" : "PREPARED";
     r.requiredMode = r.fullRequired ? "FULL" : "";
     // fingerprint 留空：v1 无内容指纹，不得伪造。
+    r.wireCanonicalization = fingerprint::WIRE_DOMAIN_V1;
     return r;
 }
 
@@ -185,6 +190,10 @@ FotaInventoryRecord decodeInventory(const std::string& bytes) {
     r.ecuListDigestHex = getStrOpt(j, "ecuListDigestHex", "");
     r.fingerprintCanonicalization = getStrOpt(j, "fingerprintCanonicalization", "");
     r.fingerprintHex = getStrOpt(j, "fingerprintHex", "");
+    // CR-014 D5：v2 记录无 wireCanonicalization => 回填 inventory-ecu-list-v1；
+    // v3 记录缺失该字段同样按 v1 域处理（不伪造新域，不重算摘要）。
+    r.wireCanonicalization =
+        getStrOpt(j, "wireCanonicalization", fingerprint::WIRE_DOMAIN_V1);
     r.baselineCode = getStrOpt(j, "baselineCode", "");
     r.fotaMasterVersion = getStrOpt(j, "fotaMasterVersion", "");
     r.collectedAtMs = j.value("collectedAtMs", Timestamp(0));

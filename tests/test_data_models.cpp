@@ -6,7 +6,8 @@ using namespace ccu_fota;
 TEST(DataModelsTest, EcuVersionEntryCreation) {
     EcuVersionEntry entry;
     entry.ecu_id = "ECU001";
-    entry.part_number = "PN123";
+    entry.part_number = "PN123";            // 总成/备件件号
+    entry.software_part_number = "SPN123";  // 独立软件件号（CR-014）
     entry.sw_version = "1.0.0";
     entry.hw_version = "HW1.0";
     entry.source = VersionSource::UDS_0x22;
@@ -14,6 +15,8 @@ TEST(DataModelsTest, EcuVersionEntryCreation) {
 
     EXPECT_EQ(entry.ecu_id, "ECU001");
     EXPECT_EQ(entry.part_number.value(), "PN123");
+    EXPECT_EQ(entry.software_part_number.value(), "SPN123");
+    EXPECT_NE(entry.part_number.value(), entry.software_part_number.value());
     EXPECT_EQ(entry.sw_version.value(), "1.0.0");
     EXPECT_EQ(entry.hw_version.value(), "HW1.0");
     EXPECT_EQ(entry.source, VersionSource::UDS_0x22);

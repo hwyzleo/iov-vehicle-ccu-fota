@@ -1,14 +1,15 @@
 // =============================================================================
 // tests/ota/diag_inventory_end_to_end_test.cpp
-// DIAG 清单读取链路端到端测试 (CCU-FOTA-DSN-CR-013 验收标准 1/2/3/5)
+// DIAG 清单读取链路端到端测试 (CCU-FOTA-DSN-CR-013 验收标准 1/2/3/5
+//                                 / CCU-FOTA-DSN-CR-014 US-041/044)
 // -----------------------------------------------------------------------------
-// 链路：Fake DIAG（真实 SomeIpRuntime + Provider，0x0002 payload v1）
+// 链路：Fake DIAG（真实 SomeIpRuntime + Provider，0x0002 payload v2）
 //   -> DiagInventoryClient（真实 SOME/IP 调用 + DiagInventoryCodec 解码）
 //   -> SnapshotAssembler -> InventoryProviderFromAssembler（稳定排序/digest/指纹）
 //   -> FotaOrchestrator -> Fake 云侧（TaskCheck 上报）
-// 断言：清单内容完全来自 DIAG（无任何代码常量）；首轮 FULL 产生 1 个版本；
-// 内容变化（模拟登记/seed→hardware）后恰好新增 1 个 revision + FULL；
-// 连续周期内容不变仍为同 1 个版本。
+// 断言：四类件号/版本逐字段进入云端且互不交叉；首轮 FULL 产生 1 个版本；
+// 内容变化后恰好新增 1 个 revision + FULL；连续十轮不增长；
+// 旧 DIAG payload v1（无软件件号）不产生任何上报或 revision。
 // =============================================================================
 
 #include "../someip/fota_someip_test_util.h"
@@ -53,28 +54,43 @@ fs::path makeUniqueRoot() {
 }
 
 // DIAG 侧清单响应（可变更内容，模拟登记后版本变化 / seed->hardware）。
+// CR-014：payloadVersion 可切回 v1 以验证混合版本 fail-closed 配对行为。
 struct DiagInventoryResponse {
+    int payloadVersion = 2;  // 2 = 目标契约（独立软件件号）；1 = 旧 DIAG
     std::string source = "seed";
     std::string baseline = "BASE-DIAG-1";
     std::string bmsVersion = "1.0.0";
     std::string vcuVersion = "1.0.0";
+    // 软件件号（与总成件号分开变化，验证内容身份覆盖软件件号）。
+    std::string bmsSoftwarePn = "SW-PN-BMS";
+    std::string vcuSoftwarePn = "SW-PN-VCU";
     // 空清单 / 缺字段等 DIAG 侧异常（验证 FOTA fail-closed，不上报空清单）。
     bool emptyList = false;
 
     std::string json() const {
         if (emptyList) {
             return std::string(R"({
-              "schemaVersion": 1,
-              "inventorySource": ")") + source + R"(",
+              "schemaVersion": )") + std::to_string(payloadVersion) + R"(,
+              "inventorySource": ")" + source + R"(",
               "vin": "VINTEST0000000001",
               "registryVersion": "2026.07.1",
               "overallResult": "ALL_OK",
               "ecuList": []
             })";
         }
+        // v2：逐 ECU 独立表达总成件号、软件件号、序列号与硬件版本；
+        // v1：字段集冻结，不含 softwarePartNumber（旧 DIAG）。
+        const std::string swPnBms =
+            payloadVersion == 2 ? "\"softwarePartNumber\":\"" + bmsSoftwarePn + "\"," : "";
+        const std::string swPnVcu =
+            payloadVersion == 2 ? "\"softwarePartNumber\":\"" + vcuSoftwarePn + "\"," : "";
+        const std::string snBms =
+            payloadVersion == 2 ? R"("serialNumber":"SN-BMS",)" : "";
+        const std::string snVcu =
+            payloadVersion == 2 ? R"("serialNumber":"SN-VCU",)" : "";
         return std::string(R"({
-          "schemaVersion": 1,
-          "inventorySource": ")") + source + R"(",
+          "schemaVersion": )") + std::to_string(payloadVersion) + R"(,
+          "inventorySource": ")" + source + R"(",
           "vin": "VINTEST0000000001",
           "vinSource": "PROVISIONED",
           "baselineId": ")" + baseline + R"(",
@@ -83,9 +99,11 @@ struct DiagInventoryResponse {
           "collectedAt": "2026-11-08T10:00:00Z",
           "overallResult": "ALL_OK",
           "ecuList": [
-            {"ecuId":"BMS","partNumber":"PN-BMS","swVersion":")" + bmsVersion +
+            {"ecuId":"BMS","partNumber":"PN-BMS",)" + swPnBms + snBms +
+            R"("swVersion":")" + bmsVersion +
             R"(","hwVersion":"HW-BMS","source":"UDS_0x22","status":"OK"},
-            {"ecuId":"VCU","partNumber":"PN-VCU","swVersion":")" + vcuVersion +
+            {"ecuId":"VCU","partNumber":"PN-VCU",)" + swPnVcu + snVcu +
+            R"("swVersion":")" + vcuVersion +
             R"(","hwVersion":"HW-VCU","source":"SOMEIP_GET_VERSION","status":"OK"}
           ]
         })";
@@ -211,10 +229,23 @@ TEST_F(DiagInventoryEndToEndTest, FirstCycleReportsDiagContent) {
     ASSERT_EQ(last.ecu_list_size(), 2);
     // 稳定排序（ecuId）：BMS < VCU。
     EXPECT_EQ(last.ecu_list(0).ecu_id(), "BMS");
+    // CR-014 D2：四类字段逐项一致，不得交叉赋值。
+    EXPECT_EQ(last.ecu_list(0).hardware_part_number(), "PN-BMS");
+    EXPECT_EQ(last.ecu_list(0).software_part_number(), "SW-PN-BMS");
     EXPECT_EQ(last.ecu_list(0).sw_version(), "1.0.0");
-    EXPECT_EQ(last.ecu_list(0).software_part_number(), "PN-BMS");
+    EXPECT_EQ(last.ecu_list(0).hw_version(), "HW-BMS");
+    EXPECT_NE(last.ecu_list(0).software_part_number(),
+              last.ecu_list(0).hardware_part_number());
+    EXPECT_NE(last.ecu_list(0).hardware_part_number(),
+              last.ecu_list(0).hw_version());
     EXPECT_EQ(last.ecu_list(1).ecu_id(), "VCU");
+    EXPECT_EQ(last.ecu_list(1).hardware_part_number(), "PN-VCU");
+    EXPECT_EQ(last.ecu_list(1).software_part_number(), "SW-PN-VCU");
     EXPECT_EQ(last.ecu_list(1).sw_version(), "1.0.0");
+    EXPECT_EQ(last.ecu_list(1).hw_version(), "HW-VCU");
+    // serialNumber 不进入任何件号字段。
+    EXPECT_NE(last.ecu_list(0).hardware_part_number(), "SN-BMS");
+    EXPECT_NE(last.ecu_list(0).software_part_number(), "SN-BMS");
     EXPECT_FALSE(last.ecu_list_digest().value_hex().empty());
 
     // 清单只承载身份，不落 ECU 内容（fota.inventory 不含清单条目）。
@@ -223,18 +254,21 @@ TEST_F(DiagInventoryEndToEndTest, FirstCycleReportsDiagContent) {
     EXPECT_EQ(rec->status, "ACCEPTED");
     EXPECT_EQ(rec->inventoryRevision, 1u);
     EXPECT_EQ(rec->baselineCode, "BASE-DIAG-1");
+    // CR-014 D5：持久化双域版本。
+    EXPECT_EQ(rec->fingerprintCanonicalization, "cgw-fota-version-v2");
+    EXPECT_EQ(rec->wireCanonicalization, "inventory-ecu-list-v2");
 }
 
 // ---------------------------------------------------------------------------
-// 内容不变：连续周期保持 1 个版本（DIGEST）
+// 内容不变：连续周期保持 1 个版本（CR-014：十轮不增长）
 // ---------------------------------------------------------------------------
 TEST_F(DiagInventoryEndToEndTest, RepeatedCyclesDoNotGrowVersions) {
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 10; ++i) {
         EXPECT_TRUE(orch_->step().error.empty());
     }
     EXPECT_EQ(transport_->inventoryVersionCount(), 1u);
     EXPECT_EQ(transport_->inventoryFullCount(), 1u);
-    EXPECT_EQ(transport_->inventoryDigestCount(), 4u);
+    EXPECT_EQ(transport_->inventoryDigestCount(), 9u);
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +294,47 @@ TEST_F(DiagInventoryEndToEndTest, DiagContentChangeAddsExactlyOneRevision) {
     // 之后内容未变：DIGEST，不再新增版本。
     ASSERT_TRUE(orch_->step().error.empty());
     EXPECT_EQ(transport_->inventoryVersionCount(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// 混合版本配对：旧 DIAG payload v1（无软件件号）+ 新 FOTA
+// => 不产生任何上报、不分配 revision（不得静默上报错误字段）。
+// ---------------------------------------------------------------------------
+TEST_F(DiagInventoryEndToEndTest, LegacyDiagPayloadV1IsNeverReported) {
+    diagResp_->payloadVersion = 1;
+    auto o = orch_->step();
+    EXPECT_FALSE(o.error.empty());
+    EXPECT_EQ(transport_->inventoryVersionCount(), 0u);
+    EXPECT_EQ(transport_->inventoryFullCount(), 0u);
+    EXPECT_FALSE(cloudStore_->loadInventory().has_value());
+    auto seq = fotaStore_->loadSequence();
+    EXPECT_FALSE(seq.has_value() && seq->highestAllocated != 0u);
+}
+
+// ---------------------------------------------------------------------------
+// CR-014 US-043：修正后首轮仅 1 个 FULL 版本；只改软件件号（总成件号不变）
+// 恰好新增一个版本，之后收敛。
+// ---------------------------------------------------------------------------
+TEST_F(DiagInventoryEndToEndTest, SoftwarePartNumberChangeAddsExactlyOneRevision) {
+    ASSERT_TRUE(orch_->step().error.empty());
+    ASSERT_EQ(transport_->inventoryVersionCount(), 1u);
+
+    // DIAG 侧只变软件件号：总成件号、软件版本与硬件版本均不变。
+    diagResp_->bmsSoftwarePn = "SW-PN-BMS-2";
+    ASSERT_TRUE(orch_->step().error.empty());
+
+    EXPECT_EQ(transport_->inventoryFullCount(), 2u);
+    EXPECT_EQ(transport_->inventoryVersionCount(), 2u);
+    EXPECT_EQ(transport_->cloudInventoryRevision(), 2u);
+    EXPECT_EQ(transport_->lastTaskCheck().ecu_list(0).hardware_part_number(),
+              "PN-BMS");
+    EXPECT_EQ(transport_->lastTaskCheck().ecu_list(0).software_part_number(),
+              "SW-PN-BMS-2");
+
+    // 之后内容不变：DIGEST，不再增长。
+    ASSERT_TRUE(orch_->step().error.empty());
+    EXPECT_EQ(transport_->inventoryVersionCount(), 2u);
+    EXPECT_EQ(transport_->inventoryFullCount(), 2u);
 }
 
 // ---------------------------------------------------------------------------

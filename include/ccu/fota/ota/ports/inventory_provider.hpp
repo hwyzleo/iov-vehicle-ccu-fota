@@ -12,6 +12,8 @@
 //
 // 采集失败、被节流、校验不过或清单为空时 collected=false：调用方不得上报、不得
 // 分配 revision，也不得产生 revision=0 或空清单版本（CR-012 D7）。
+// CR-014 D3：SINGLE_IMAGE 必需事实（ecuId/softwarePartNumber/swVersion）缺失时
+// 同样 collected=false，并通过 collectionErrorCode / collectionErrorDetail 可观测。
 // =============================================================================
 
 #include "vehicle/fota/v1/types.pb.h"
@@ -27,16 +29,23 @@ namespace ota {
 struct CollectedInventory {
     // true 表示采集成功且内容可上报。false 时其余字段无意义。
     bool collected = false;
-    // wire 摘要：对稳定排序 + 规范化（inventory-ecu-list-v1）后的 ECU 列表计算。
+    // wire 摘要：对稳定排序 + 规范化（inventory-ecu-list-v2）后的 ECU 列表计算。
     ::vehicle::fota::v1::Digest ecuListDigest;             // algorithm + value_hex
     // 稳定排序后的完整 ECU 清单（FULL 上报使用；DIGEST 上报时不入报文）。
     std::vector<::vehicle::fota::v1::EcuVersion> ecuList;
     std::string baselineCode;
     std::string fotaMasterVersion;
     std::int64_t collectedAtMs = 0;
-    // 本地内容变化判据：versionFingerprint（cgw-fota-version-v1）。
+    // 本地内容变化判据：versionFingerprint（cgw-fota-version-v2）。
     std::string fingerprintCanonicalization;
     std::string fingerprintHex;
+    // wire ecuListDigest 的规范化域（inventory-ecu-list-v2，CR-014 D5）。
+    // 与 fingerprintCanonicalization 一同决定身份是否可跨轮次复用。
+    std::string wireCanonicalization;
+    // collected=false 时的可定位原因（FOTA-INVENTORY-* 错误码与细节）。
+    // 细节只含字段名与 ECU 索引，不得包含件号、版本或 VIN 原值。
+    std::string collectionErrorCode;
+    std::string collectionErrorDetail;
 };
 
 class InventoryProvider {

@@ -103,7 +103,12 @@ inline const char* inventorySourceToString(InventorySource s) {
 
 struct EcuVersionEntry {
     std::string ecu_id;
+    // 总成/备件零件号（DID F187）：协议允许为空，车云侧写入 hardware_part_number。
     std::optional<std::string> part_number;
+    // 独立软件零件号（DID F188 或等效 SOME/IP）：CCU-FOTA-DSN-CR-014 US-040。
+    // DIAG payload v1 不提供 => 保持缺失（不得用 partNumber 补齐）。
+    // ECU 实例序列号（serialNumber）不是件号，不进入本字段或任何 PN 字段。
+    std::optional<std::string> software_part_number;
     std::optional<std::string> sw_version;
     std::optional<std::string> hw_version;
     VersionSource source = VersionSource::UDS_0x22;

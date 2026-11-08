@@ -36,6 +36,7 @@ VehicleSoftwareSnapshot makeSnapshot(std::uint64_t seq) {
     EcuVersionEntry e;
     e.ecu_id = "ECU1";
     e.part_number = "P001";
+    e.software_part_number = "SP001";  // CR-014：独立软件件号
     e.sw_version = "1.2.3";
     e.source = VersionSource::UDS_0x22;
     e.status = EcuStatus::OK;
@@ -156,7 +157,42 @@ TEST(FotaStateSerializerTest, LastSuccessRoundTrip) {
     EXPECT_EQ(d.snapshot.snapshot_seq, 100u);
     ASSERT_EQ(d.snapshot.ecu_list.size(), 1u);
     EXPECT_EQ(d.snapshot.ecu_list[0].ecu_id, "ECU1");
+    EXPECT_EQ(d.snapshot.ecu_list[0].part_number.value(), "P001");
+    // CR-014：软件件号独立往返，不得与 part_number 混用。
+    EXPECT_EQ(d.snapshot.ecu_list[0].software_part_number.value(), "SP001");
     EXPECT_EQ(d.snapshot.ecu_list[0].sw_version.value(), "1.2.3");
+}
+
+// ===========================================================================
+// CR-014 D4：快照指纹域升 v2，v1 记录仍可读取；未知域 fail-closed
+// ===========================================================================
+TEST(FotaStateSerializerTest, SnapshotV2DomainAccepted) {
+    LastSuccessState s;
+    s.reportId = "rpt-v2";
+    s.snapshotSeq = 1;
+    s.overallResult = CollectionStatus::ALL_OK;
+    s.fingerprints.algorithm = "sha-256";
+    s.fingerprints.canonicalization = "cgw-fota-snapshot-v2";
+    s.fingerprints.versionFingerprintHex = std::string(64, '1');
+    s.fingerprints.snapshotFingerprintHex = std::string(64, '2');
+    s.fingerprints.dedupeKeyHex = std::string(64, '3');
+    s.snapshot = makeSnapshot(1);
+
+    LastSuccessState d = decodeLastSuccess(encodeLastSuccess(s));
+    EXPECT_EQ(d.fingerprints.canonicalization, "cgw-fota-snapshot-v2");
+}
+
+TEST(FotaStateSerializerTest, UnknownSnapshotDomainFailsClosed) {
+    LastSuccessState s;
+    s.reportId = "rpt-vX";
+    s.snapshotSeq = 1;
+    s.overallResult = CollectionStatus::ALL_OK;
+    s.fingerprints.algorithm = "sha-256";
+    s.fingerprints.canonicalization = "cgw-fota-snapshot-v3";
+    s.fingerprints.snapshotFingerprintHex = std::string(64, '4');
+    s.snapshot = makeSnapshot(1);
+
+    EXPECT_THROW(decodeLastSuccess(encodeLastSuccess(s)), StateDecodeError);
 }
 
 TEST(FotaStateSerializerTest, LastSuccessMigrationV0ToV2) {

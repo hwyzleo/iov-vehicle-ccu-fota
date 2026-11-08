@@ -86,36 +86,51 @@ const char* identifierKindSuffix(IdentifierKind kind) {
 }
 
 // ===========================================================================
-// ECU 稳定排序：按 (ecuId, partNumber, swVersion, 原始索引) 全序排序；
-// 若 (ecuId, partNumber, swVersion) 仍重复 -> CanonicalError，不回退输入顺序。
+// ECU 稳定排序（CCU-FOTA-DSN-CR-014 D4）：
+// 按 (ecuId, partNumber, softwarePartNumber, swVersion, hwVersion) 全序排序；
+// 若完整键仍重复 -> CanonicalError，不回退输入顺序。
 // ===========================================================================
+struct EcuStableKey {
+    std::string ecuId;
+    std::string partNumber;
+    std::string softwarePartNumber;
+    std::string swVersion;
+    std::string hwVersion;
+
+    bool operator<(const EcuStableKey& o) const {
+        return std::tie(ecuId, partNumber, softwarePartNumber, swVersion,
+                        hwVersion) <
+               std::tie(o.ecuId, o.partNumber, o.softwarePartNumber,
+                        o.swVersion, o.hwVersion);
+    }
+    bool operator==(const EcuStableKey& o) const {
+        return std::tie(ecuId, partNumber, softwarePartNumber, swVersion,
+                        hwVersion) ==
+               std::tie(o.ecuId, o.partNumber, o.softwarePartNumber,
+                        o.swVersion, o.hwVersion);
+    }
+};
+
+EcuStableKey stableKeyOf(const EcuVersionEntry& e) {
+    return EcuStableKey{e.ecu_id,
+                        e.part_number.value_or(""),
+                        e.software_part_number.value_or(""),
+                        e.sw_version.value_or(""),
+                        e.hw_version.value_or("")};
+}
+
 std::vector<std::size_t> sortEcuIndices(const std::vector<EcuVersionEntry>& ecus) {
     std::vector<std::size_t> order(ecus.size());
     for (std::size_t i = 0; i < ecus.size(); ++i) {
         order[i] = i;
     }
-    auto stableKey = [&](std::size_t i) {
-        return std::tuple<std::string, std::string, std::string, std::size_t>(
-            ecus[i].ecu_id,
-            ecus[i].part_number.value_or(""),
-            ecus[i].sw_version.value_or(""),
-            i);
-    };
     std::stable_sort(order.begin(), order.end(),
                      [&](std::size_t a, std::size_t b) {
-                         return stableKey(a) < stableKey(b);
+                         return stableKeyOf(ecus[a]) < stableKeyOf(ecus[b]);
                      });
-    // 重复稳定键检测
+    // 重复完整稳定键检测（fail-closed，不以原始索引兜底）
     for (std::size_t i = 1; i < order.size(); ++i) {
-        auto ka = std::tuple<std::string, std::string, std::string>(
-            ecus[order[i - 1]].ecu_id,
-            ecus[order[i - 1]].part_number.value_or(""),
-            ecus[order[i - 1]].sw_version.value_or(""));
-        auto kb = std::tuple<std::string, std::string, std::string>(
-            ecus[order[i]].ecu_id,
-            ecus[order[i]].part_number.value_or(""),
-            ecus[order[i]].sw_version.value_or(""));
-        if (ka == kb) {
+        if (stableKeyOf(ecus[order[i - 1]]) == stableKeyOf(ecus[order[i]])) {
             throw CanonicalError("CCU-FOTA-2001",
                                  "duplicate ECU stable key: ecuId=" +
                                      ecus[order[i]].ecu_id);
@@ -124,26 +139,30 @@ std::vector<std::size_t> sortEcuIndices(const std::vector<EcuVersionEntry>& ecus
     return order;
 }
 
-// versionFingerprint ECU 子记录字段：ecuId/partNumber/swVersion/hwVersion
+// versionFingerprint v2 ECU 子记录字段：
+// ecuId/partNumber/softwarePartNumber/swVersion/hwVersion（CR-014 D4 字段布局）
 std::vector<std::uint8_t> encodeVersionEcu(const EcuVersionEntry& e) {
     CanonicalEncoder sub("");
     sub.writeStringField(0x0001, e.ecu_id);
     sub.writeOptionalStringField(0x0002, e.part_number);
-    sub.writeOptionalStringField(0x0003, e.sw_version);
-    sub.writeOptionalStringField(0x0004, e.hw_version);
+    sub.writeOptionalStringField(0x0003, e.software_part_number);
+    sub.writeOptionalStringField(0x0004, e.sw_version);
+    sub.writeOptionalStringField(0x0005, e.hw_version);
     return sub.finalize();
 }
 
-// snapshotFingerprint ECU 子记录字段：ecuId/partNumber/swVersion/hwVersion/source/status/errorCode
+// snapshotFingerprint v2 ECU 子记录字段：
+// 完整件号/版本事实 + source/status/errorCode（CR-014 D4）
 std::vector<std::uint8_t> encodeSnapshotEcu(const EcuVersionEntry& e) {
     CanonicalEncoder sub("");
     sub.writeStringField(0x0001, e.ecu_id);
     sub.writeOptionalStringField(0x0002, e.part_number);
-    sub.writeOptionalStringField(0x0003, e.sw_version);
-    sub.writeOptionalStringField(0x0004, e.hw_version);
-    sub.writeEnumField(0x0005, versionSourceCode(e.source));
-    sub.writeEnumField(0x0006, ecuStatusCode(e.status));
-    sub.writeOptionalStringField(0x0007, e.error_code);
+    sub.writeOptionalStringField(0x0003, e.software_part_number);
+    sub.writeOptionalStringField(0x0004, e.sw_version);
+    sub.writeOptionalStringField(0x0005, e.hw_version);
+    sub.writeEnumField(0x0006, versionSourceCode(e.source));
+    sub.writeEnumField(0x0007, ecuStatusCode(e.status));
+    sub.writeOptionalStringField(0x0008, e.error_code);
     return sub.finalize();
 }
 
@@ -163,7 +182,7 @@ Fingerprint makeFingerprint(std::string_view canonicalization,
 } // namespace
 
 // ===========================================================================
-// versionFingerprint v1
+// versionFingerprint v2（CR-014）
 // ===========================================================================
 Fingerprint buildVersionFingerprint(const VehicleSoftwareSnapshot& snapshot) {
     CanonicalEncoder enc(VERSION_DOMAIN);
@@ -183,7 +202,7 @@ Fingerprint buildVersionFingerprint(const VehicleSoftwareSnapshot& snapshot) {
 }
 
 // ===========================================================================
-// snapshotFingerprint v1
+// snapshotFingerprint v2（CR-014）
 // ===========================================================================
 Fingerprint buildSnapshotFingerprint(const VehicleSoftwareSnapshot& snapshot) {
     // VIN 使用 identifierDigest(vin)，不放入明文 VIN

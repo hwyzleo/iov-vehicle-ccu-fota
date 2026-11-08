@@ -58,22 +58,27 @@ public:
         info.baselineCode = scenario_.baseline;
         if (!available_) return info;  // 采集失败：collected=false
 
+        // CR-014 D2：总成件号、软件件号、软件版本与硬件版本取互不相同的值，
+        // 防止测试继续固化旧交叉映射（partNumber<->software / hwVersion<->hardware）。
         ::vehicle::fota::v1::EcuVersion e;
         e.set_ecu_id("VCU-001");
-        e.set_hardware_part_number(hwVersion_);
-        e.set_software_part_number("S-VCU-001");
+        e.set_hardware_part_number(partNumber_);
+        e.set_software_part_number(softwarePartNumber_);
         e.set_sw_version(swVersion_);
+        e.set_hw_version(hwVersion_);
         info.ecuList.push_back(e);
 
         // 稳定规范化：与生产实现同构的确定性输入（Mock 仅用于测试）。
-        const std::string canon = std::string("mock-ecu-list-v1|") + e.ecu_id() +
-                                  "|" + hwVersion_ + "|" +
-                                  e.software_part_number() + "|" + swVersion_;
+        const std::string canon = std::string("mock-ecu-list-v2|") + e.ecu_id() +
+                                  "|" + partNumber_ + "|" +
+                                  softwarePartNumber_ + "|" + swVersion_ + "|" +
+                                  hwVersion_;
         info.ecuListDigest.set_algorithm("sha-256");
         info.ecuListDigest.set_value_hex(ccu::fw::hash::sha256_hex(canon));
-        info.fingerprintCanonicalization = "cgw-fota-version-v1";
+        info.fingerprintCanonicalization = "cgw-fota-version-v2";
         info.fingerprintHex = ccu::fw::hash::sha256_hex(
             canon + "|fp|" + scenario_.baseline + "|" + scenario_.fotaMasterVersion);
+        info.wireCanonicalization = "inventory-ecu-list-v2";
         info.collected = true;
         return info;
     }
@@ -87,8 +92,11 @@ public:
 private:
     ScenarioScript scenario_;
     std::int64_t nowMs_ = 1000;
-    std::string hwVersion_ = "P-VCU-001";
-    std::string swVersion_ = "1.0.0";
+    // 四类字段取值互不相同（CR-014 D2）。
+    std::string partNumber_ = "HT-VCU-001";          // 总成/备件件号
+    std::string softwarePartNumber_ = "SW-VCU-001";  // 软件件号
+    std::string hwVersion_ = "HWV-VCU-001";          // 硬件版本
+    std::string swVersion_ = "1.0.0";                // 软件版本
     bool available_ = true;
 };
 
