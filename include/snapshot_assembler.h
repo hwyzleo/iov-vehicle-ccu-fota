@@ -11,13 +11,24 @@ namespace ccu_fota {
 
 namespace store { class FotaStateStore; }  // CCU-FOTA-DSN-CR-005
 
+// 序号分配策略 (CCU-FOTA-DSN-CR-012 D2)。
+//   Allocate: 旧启动自动上报路径，采集成功后立即 durable 分配 snapshotSeq。
+//   Defer:    车云任务检测路径，只产出快照内容；序号只在上报决策点由
+//             InventoryIdentityPlanner 分配（采集阶段严禁分配）。
+enum class SeqPolicy { Allocate, Defer };
+
 class SnapshotAssembler {
 public:
     // CCU-FOTA-DSN-CR-007: DIAG 采集 Client 改为 framework-backed 适配器。
     SnapshotAssembler(std::shared_ptr<someip::DiagInventoryClient> client);
     virtual ~SnapshotAssembler() = default;
 
+    // 兼容旧调用：等价于 assembleSnapshot(snapshot, SeqPolicy::Allocate)。
     virtual bool assembleSnapshot(VehicleSoftwareSnapshot& snapshot);
+
+    // 按显式序号策略组装快照。Defer 时不分配 snapshotSeq（保持 0），
+    // 供车云任务检测路径复用采集结果而不消耗版本序号。
+    virtual bool assembleSnapshot(VehicleSoftwareSnapshot& snapshot, SeqPolicy policy);
 
     void setThrottleInterval(uint32_t interval_ms);
     void setMaxEcuCount(uint32_t max_count);

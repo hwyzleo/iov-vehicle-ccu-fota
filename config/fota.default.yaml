@@ -16,6 +16,8 @@ fota:
     max_pending_requests: 32          # 等待队列上限 1..1024（同一时刻仍最多一轮采集）
     dedupe_max_entries: 100           # 去重窗口条目上限 1..1024 (CCU-FOTA-DSN-CR-005)
     dedupe_ttl_ms: 3600000            # 去重窗口保留期（ms），0 表示无 TTL
+    identity_retry_backoff_ms: 5000   # 同一清单身份的失败重试退避 0..600000 (CCU-FOTA-DSN-CR-012)
+    digest_max_consecutive_failures: 3 # 连续 DIGEST 失配上限 1..10 (CR-012)
   diag:
     collect_timeout_ms: 30000         # DIAG 采集超时，正整数
     retry_max_attempts: 2             # 采集重试次数 0..10

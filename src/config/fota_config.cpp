@@ -68,7 +68,9 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
     rejectUnknown(s, "fota.inventory",
                   {"change_detection_enabled",
                    "min_report_interval_ms", "max_pending_requests",
-                   "dedupe_max_entries", "dedupe_ttl_ms"});
+                   "dedupe_max_entries", "dedupe_ttl_ms",
+                   "identity_retry_backoff_ms",
+                   "digest_max_consecutive_failures"});
 
     c.changeDetectionEnabled =
         s.getOr<bool>("fota.inventory.change_detection_enabled", true);
@@ -96,6 +98,19 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
         s.getOr<std::int64_t>("fota.inventory.dedupe_ttl_ms", 3600000);
     requireRange("fota.inventory.dedupe_ttl_ms", dedupeTtl, 0, INT64_MAX);
     c.dedupeTtlMs = dedupeTtl;
+
+    // ---- 清单身份 (CCU-FOTA-DSN-CR-012) ----
+    // 同一清单身份的失败重试退避（不得因传输失败产生新版本）。
+    std::int64_t invRetry =
+        s.getOr<std::int64_t>("fota.inventory.identity_retry_backoff_ms", 5000);
+    requireRange("fota.inventory.identity_retry_backoff_ms", invRetry, 0, 600000);
+    c.inventoryIdentityRetryBackoff = std::chrono::milliseconds(invRetry);
+
+    // 连续 DIGEST 失配上限（防御规范化实现不一致导致抖动）。
+    std::int64_t digestMax = s.getOr<std::int64_t>(
+        "fota.inventory.digest_max_consecutive_failures", 3);
+    requireRange("fota.inventory.digest_max_consecutive_failures", digestMax, 1, 10);
+    c.inventoryDigestMaxConsecutiveFailures = static_cast<std::uint32_t>(digestMax);
 
     // ---- common.store.root (CCU-FOTA-DSN-CR-005) ----
     c.storeRoot = s.getOr<std::string>("common.store.root", "/var/lib/ccu");

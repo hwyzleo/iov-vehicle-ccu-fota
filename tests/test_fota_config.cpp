@@ -61,6 +61,9 @@ TEST(FotaConfigTest, DefaultsWhenKeysAbsent) {
     EXPECT_TRUE(c.changeDetectionEnabled);
     EXPECT_EQ(c.minReportInterval.count(), 300000);
     EXPECT_EQ(c.maxPendingRequests, 32u);
+    // CCU-FOTA-DSN-CR-012 清单身份缺省值
+    EXPECT_EQ(c.inventoryIdentityRetryBackoff.count(), 5000);
+    EXPECT_EQ(c.inventoryDigestMaxConsecutiveFailures, 3u);
     EXPECT_EQ(c.diagCollectTimeout.count(), 30000);
     EXPECT_EQ(c.diagRetry.maxAttempts, 2u);
     EXPECT_EQ(c.diagRetry.backoff.count(), 1000);
@@ -80,6 +83,72 @@ TEST(FotaConfigTest, OverridesMapped) {
     EXPECT_EQ(c.diagCollectTimeout.count(), 15000);
     EXPECT_EQ(c.diagRetry.maxAttempts, 1u);
     EXPECT_EQ(c.diagRetry.backoff.count(), 500);
+}
+
+// ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-012：清单身份配置项边界与未知字段
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, InventoryIdentityKeysMappedAndValidated) {
+    TempDir root;
+    auto snap = loadFota(root, R"(
+fota:
+  inventory:
+    change_detection_enabled: true
+    min_report_interval_ms: 300000
+    max_pending_requests: 32
+    identity_retry_backoff_ms: 1200
+    digest_max_consecutive_failures: 5
+  log: {}
+)");
+    FotaConfig c = FotaConfig::from(*snap);
+    EXPECT_EQ(c.inventoryIdentityRetryBackoff.count(), 1200);
+    EXPECT_EQ(c.inventoryDigestMaxConsecutiveFailures, 5u);
+
+    // 下界：0 合法；超上限 / 0 次失配均 fail-closed。
+    TempDir root2;
+    auto zeroBackoff = loadFota(root2, R"(
+fota:
+  inventory:
+    identity_retry_backoff_ms: 0
+  log: {}
+)");
+    EXPECT_EQ(FotaConfig::from(*zeroBackoff).inventoryIdentityRetryBackoff.count(), 0);
+
+    TempDir root3;
+    auto tooLarge = loadFota(root3, R"(
+fota:
+  inventory:
+    identity_retry_backoff_ms: 600001
+  log: {}
+)");
+    EXPECT_THROW(FotaConfig::from(*tooLarge), FotaConfigException);
+
+    TempDir root4;
+    auto badFailures = loadFota(root4, R"(
+fota:
+  inventory:
+    digest_max_consecutive_failures: 0
+  log: {}
+)");
+    EXPECT_THROW(FotaConfig::from(*badFailures), FotaConfigException);
+
+    TempDir root5;
+    auto toomany = loadFota(root5, R"(
+fota:
+  inventory:
+    digest_max_consecutive_failures: 11
+  log: {}
+)");
+    EXPECT_THROW(FotaConfig::from(*toomany), FotaConfigException);
+
+    TempDir root6;
+    auto unknown = loadFota(root6, R"(
+fota:
+  inventory:
+    revision_auto_increment: true
+  log: {}
+)");
+    EXPECT_THROW(FotaConfig::from(*unknown), FotaConfigException);
 }
 
 // ---------------------------------------------------------------------------

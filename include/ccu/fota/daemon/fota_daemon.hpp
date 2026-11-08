@@ -61,7 +61,8 @@ public:
         std::shared_ptr<ota::InstallExecutor> exec,
         std::shared_ptr<ota::LogCollector> log,
         std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
-        std::shared_ptr<ota::ClockSyncProvider> clockSync = nullptr);
+        std::shared_ptr<ota::ClockSyncProvider> clockSync = nullptr,
+        ota::RevisionAllocator revisionAllocator = nullptr);
 
     ~FotaDaemon();
 
@@ -93,7 +94,8 @@ private:
                std::shared_ptr<ota::InstallExecutor> exec,
                std::shared_ptr<ota::LogCollector> log,
                std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
-               std::shared_ptr<ota::ClockSyncProvider> clockSync);
+               std::shared_ptr<ota::ClockSyncProvider> clockSync,
+               ota::RevisionAllocator revisionAllocator);
 
     void timerLoop();
     // 记录 step 结果中需要运维可见的状态（当前：等待时钟同步的进入/退出）。

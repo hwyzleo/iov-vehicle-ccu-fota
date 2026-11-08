@@ -8,12 +8,18 @@
 
 #include "ccu/fota/ota/ports/production_ports.hpp"
 
+#include "ccu/fota/fingerprint/canonical_encoder.hpp"
+#include "ccu/fota/fingerprint/inventory_fingerprint.hpp"
+
 #include "ccu/fw/hash/sha256.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <sstream>
 #include <system_error>
+#include <tuple>
+#include <vector>
 
 #if defined(__linux__)
 #include <sys/timex.h>
@@ -27,6 +33,15 @@ std::int64_t nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch()).count();
 }
+
+// wire digest 的规范化域（CCU-FOTA-DSN-CR-012 §规范化）。
+// 变更此字符串或字段布局 = 摘要域版本升级，须同步 golden 向量。
+constexpr const char* kInventoryWireDomain = "inventory-ecu-list-v1";
+
+// CanonicalEncoder::finalize() 的结果转 ByteView（sha256_hex 入参）。
+ccu::fw::hash::ByteView binaryToView(const std::vector<std::uint8_t>& bytes) {
+    return ccu::fw::hash::ByteView{bytes.data(), bytes.size()};
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -37,43 +52,87 @@ InventoryProviderFromAssembler::InventoryProviderFromAssembler(
     : assembler_(std::move(assembler))
     , fotaMasterVersion_(std::move(fotaMasterVersion)) {}
 
-CollectedInventory InventoryProviderFromAssembler::collectInventory(
-    ::vehicle::fota::v1::InventoryMode mode) {
+CollectedInventory InventoryProviderFromAssembler::collectInventory() {
     CollectedInventory info;
-    info.mode = mode;
     info.fotaMasterVersion = fotaMasterVersion_;
     info.collectedAtMs = nowMs();
 
     if (!assembler_) {
-        // 没有可用的清单采集源 -> 空清单（FULL 时由 Orchestrator/云端拒绝）。
+        // 没有可用采集源 -> collected=false（CR-012 D7：不上报、不分配）。
         return info;
     }
     VehicleSoftwareSnapshot snap;
-    if (!assembler_->assembleSnapshot(snap)) {
-        return info;  // 采集失败 -> 空清单，不伪造摘要
+    // CR-012 D2：任务检测路径不得在采集阶段分配序号。
+    if (!assembler_->assembleSnapshot(snap, SeqPolicy::Defer)) {
+        return info;  // 采集失败/节流/校验不过 -> 不上报
+    }
+    if (snap.ecu_list.empty()) {
+        return info;  // 空清单不得作为 FULL 上报（D7）
     }
 
     info.baselineCode = snap.baseline_id.value_or("");
-    info.inventoryRevision = snap.snapshot_seq;
 
-    std::stringstream canon;
-    if (mode == ::vehicle::fota::v1::INVENTORY_MODE_FULL) {
-        for (const auto& e : snap.ecu_list) {
-            ::vehicle::fota::v1::EcuVersion ev;
-            ev.set_ecu_id(e.ecu_id);
-            if (e.hw_version) ev.set_hardware_part_number(*e.hw_version);
-            if (e.part_number) ev.set_software_part_number(*e.part_number);
-            if (e.sw_version) ev.set_sw_version(*e.sw_version);
-            info.ecuList.push_back(std::move(ev));
-            canon << e.ecu_id << '|'
-                  << e.hw_version.value_or("") << '|'
-                  << e.part_number.value_or("") << '|'
-                  << e.sw_version.value_or("") << ';';
-        }
+    // ---------------------------------------------------------------
+    // 稳定排序 (CR-012 §规范化)：ecuId -> hardware -> software part -> swVersion。
+    // 排序后同时用于 wire ecuList、wire digest 与本地版本指纹，避免 DIAG 返回顺序
+    // 抖动导致 digest 漂移。
+    // ---------------------------------------------------------------
+    std::vector<const EcuVersionEntry*> ordered;
+    ordered.reserve(snap.ecu_list.size());
+    for (const auto& e : snap.ecu_list) ordered.push_back(&e);
+    std::sort(ordered.begin(), ordered.end(),
+              [](const EcuVersionEntry* a, const EcuVersionEntry* b) {
+                  return std::make_tuple(a->ecu_id,
+                                         a->hw_version.value_or(""),
+                                         a->part_number.value_or(""),
+                                         a->sw_version.value_or("")) <
+                         std::make_tuple(b->ecu_id,
+                                         b->hw_version.value_or(""),
+                                         b->part_number.value_or(""),
+                                         b->sw_version.value_or(""));
+              });
+
+    std::vector<std::vector<std::uint8_t>> canonItems;
+    canonItems.reserve(ordered.size());
+    info.ecuList.reserve(ordered.size());
+    for (const auto* e : ordered) {
+        if (e->ecu_id.empty()) continue;
+        ::vehicle::fota::v1::EcuVersion ev;
+        ev.set_ecu_id(e->ecu_id);
+        if (e->hw_version) ev.set_hardware_part_number(*e->hw_version);
+        if (e->part_number) ev.set_software_part_number(*e->part_number);
+        if (e->sw_version) ev.set_sw_version(*e->sw_version);
+        info.ecuList.push_back(std::move(ev));
+
+        fingerprint::CanonicalEncoder sub("");
+        sub.writeStringField(0x0001, e->ecu_id);
+        sub.writeOptionalStringField(0x0002, e->hw_version);
+        sub.writeOptionalStringField(0x0003, e->part_number);
+        sub.writeOptionalStringField(0x0004, e->sw_version);
+        canonItems.push_back(sub.finalize());
     }
-    // ecuListDigest：对规范化的 ECU 列表计算 SHA-256（确定性；用于任务检测/对账）。
-    info.ecuListDigest.set_algorithm("sha-256");
-    info.ecuListDigest.set_value_hex(ccu::fw::hash::sha256_hex(canon.str()));
+
+    try {
+        // wire digest：独立版本化的 wire 规范化域 inventory-ecu-list-v1。
+        fingerprint::CanonicalEncoder wire(kInventoryWireDomain);
+        wire.writeListField(0x0001, canonItems);
+        info.ecuListDigest.set_algorithm("sha-256");
+        info.ecuListDigest.set_value_hex(
+            ccu::fw::hash::sha256_hex(binaryToView(wire.finalize())));
+
+        // 本地内容变化判据：versionFingerprint（cgw-fota-version-v1，CR-006）。
+        auto fp = fingerprint::buildVersionFingerprint(snap);
+        info.fingerprintCanonicalization = fp.canonicalization;
+        info.fingerprintHex = fp.hex();
+    } catch (const std::exception&) {
+        // 规范化/摘要失败 -> fail-closed（不产生空摘要、不上报）。
+        info = CollectedInventory{};
+        info.fotaMasterVersion = fotaMasterVersion_;
+        info.collectedAtMs = nowMs();
+        return info;
+    }
+
+    info.collected = true;
     return info;
 }
 

@@ -62,6 +62,7 @@ set(FOTA_SOURCES
     src/ota/state/execution_state.cpp
     src/ota/state/state_proto.cpp
     src/ota/fota_orchestrator.cpp
+    src/ota/inventory_identity_planner.cpp
     src/ota/fota_cloud_proxy_via_transport.cpp
     src/ota/someip_vehicle_message_transport.cpp
     src/ota/production_ports.cpp
@@ -132,6 +133,9 @@ if(FOTA_BUILD_TESTS)
         tests/ota/transport_contract_test.cpp
         tests/ota/someip_transport_contract_test.cpp
         tests/ota/daemon_assembly_test.cpp
+        tests/ota/inventory_identity_planner_test.cpp
+        tests/ota/inventory_revision_test.cpp
+        tests/ota/inventory_provider_test.cpp
         # Mock scenario 仅测试 target 编译（NON_PRODUCTION，CR-009 §构建与运行隔离）
         src/ota/mock/scenario_script.cpp
     )

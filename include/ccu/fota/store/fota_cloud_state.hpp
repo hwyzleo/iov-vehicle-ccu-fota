@@ -61,7 +61,8 @@ inline std::string logJobKey(const std::string& logRequestId) { return LOG_JOBS_
 // ============================================================
 namespace schema {
 constexpr std::uint32_t VEHICLE_TASK_VERSION = 1;
-constexpr std::uint32_t INVENTORY_VERSION    = 1;
+// CR-012: v2 引入清单身份字段（status/acceptedRevision/fingerprint/retry）。
+constexpr std::uint32_t INVENTORY_VERSION    = 2;
 constexpr std::uint32_t CONSENT_VERSION      = 1;
 constexpr std::uint32_t DOWNLOADS_VERSION    = 1;
 constexpr std::uint32_t EXECUTION_VERSION    = 1;
@@ -91,19 +92,35 @@ struct FotaVehicleTaskRecord {
 };
 
 // ============================================================
-// fota.inventory
+// fota.inventory - 清单身份（CCU-FOTA-DSN-CR-012 §持久化模型）
 // ============================================================
+// inventoryRevision 是“清单内容版本”，不是采集次数：同一内容必须复用同一
+// revision。status 描述身份生命周期：
+//   PREPARED            已分配/复用身份并将在（或已经）上行，云端尚未回执
+//   ACCEPTED            云端已接受（acceptedInventoryRevision 为云端回执值）
+//   REQUIRED_FULL       云端要求下一次上报完整清单（revision 保留）
+//   CONFLICT            云端已将该 revision 绑定到不同内容（revision 弃用）
+//   ALGORITHM_UNSUPPORTED 云端不支持当前算法（换算法后 FULL，revision 保留）
 struct FotaInventoryRecord {
     std::uint32_t schemaVersion = schema::INVENTORY_VERSION;
+    std::string   status = "PREPARED";
     std::string   mode;                    // FULL / DIGEST
     std::uint64_t inventoryRevision = 0;
+    std::uint64_t acceptedInventoryRevision = 0;  // 0 = 尚无云端回执
+    std::string   requiredMode;             // "" / FULL / DIGEST（来自云端回执）
     std::string   algorithm;
     std::string   ecuListDigestHex;
+    std::string   fingerprintCanonicalization;   // cgw-fota-version-v1
+    std::string   fingerprintHex;                // 空 = 身份不可用（旧格式）
     std::string   baselineCode;
     std::string   fotaMasterVersion;
     Timestamp     collectedAtMs = 0;
-    std::string   requestPbHex;            // TaskCheckRequest proto binary hex（含 ecu_list）
-    bool          fullRequired = false;    // 云端要求下次 FULL
+    std::string   requestPbHex;            // TaskCheckRequest proto binary hex
+    std::uint32_t attempt = 0;             // 同一身份的尝试次数（重试不新增版本）
+    Timestamp     nextRetryAtMs = 0;       // 同身份重试退避截止时间
+    std::string   lastErrorCode;
+    std::uint32_t digestFailures = 0;      // 连续 DIGEST 失配次数
+    bool          fullRequired = false;    // 兼容 v1，等价 requiredMode=="FULL"
 };
 
 // ============================================================

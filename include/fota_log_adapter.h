@@ -25,6 +25,15 @@ constexpr const char* TBOX_SUBMIT_SUCCEEDED      = "fota.tbox.submit.succeeded";
 constexpr const char* TBOX_SUBMIT_FAILED         = "fota.tbox.submit.failed";
 // Report completed
 constexpr const char* INVENTORY_REPORT_COMPLETED = "fota.inventory.report.completed";
+// Inventory identity (CCU-FOTA-DSN-CR-012)
+// 清单版本是内容版本：日志只记 revision/mode/algorithm/digest/reason，
+// 禁止输出完整 ECU 清单与 VIN 原值。
+constexpr const char* INVENTORY_COLLECT_EMPTY       = "fota.inventory.collect.empty";
+constexpr const char* INVENTORY_FINGERPRINT_COMPARED = "fota.inventory.fingerprint.compared";
+constexpr const char* INVENTORY_REVISION_ALLOCATED  = "fota.inventory.revision.allocated";
+constexpr const char* INVENTORY_REVISION_REUSED     = "fota.inventory.revision.reused";
+constexpr const char* INVENTORY_DISPOSITION         = "fota.inventory.disposition";
+constexpr const char* INVENTORY_IDENTITY_FAILED     = "fota.inventory.identity.failed";
 // Service lifecycle
 constexpr const char* SERVICE_STARTING           = "fota.service.starting";
 constexpr const char* SERVICE_CONFIG_LOADED      = "fota.service.config_loaded";

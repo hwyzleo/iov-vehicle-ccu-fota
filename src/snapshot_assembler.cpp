@@ -18,6 +18,11 @@ SnapshotAssembler::SnapshotAssembler(std::shared_ptr<someip::DiagInventoryClient
 }
 
 bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
+    return assembleSnapshot(snapshot, SeqPolicy::Allocate);
+}
+
+bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot,
+                                         SeqPolicy policy) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto start_time = std::chrono::steady_clock::now();
@@ -96,7 +101,11 @@ bool SnapshotAssembler::assembleSnapshot(VehicleSoftwareSnapshot& snapshot) {
     }
 
     // Update sequence number: durable allocation if store present (CCU-FOTA-DSN-CR-005)
-    if (state_store_) {
+    // CCU-FOTA-DSN-CR-012 D2：Defer 路径不得在采集阶段分配序号（分配点只在上报
+    // 决策点，由 InventoryIdentityPlanner 统一执行）。
+    if (policy == SeqPolicy::Defer) {
+        snapshot.snapshot_seq = 0;
+    } else if (state_store_) {
         try {
             snapshot.snapshot_seq = state_store_->allocateSnapshotSeq();
         } catch (const ccu_fota::store::SeqAllocBlocked&) {

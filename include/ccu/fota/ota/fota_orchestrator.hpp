@@ -22,6 +22,7 @@
 #include "ccu/fota/ota/call_context.hpp"
 #include "ccu/fota/ota/event_sink.hpp"
 #include "ccu/fota/ota/fota_cloud_proxy.hpp"
+#include "ccu/fota/ota/inventory_identity_planner.hpp"
 #include "ccu/fota/ota/ports/clock_sync_provider.hpp"
 #include "ccu/fota/ota/ports/consent_provider.hpp"
 #include "ccu/fota/ota/ports/install_executor.hpp"
@@ -37,6 +38,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -60,6 +62,14 @@ struct FotaOrchestratorConfig {
     // 等待时钟同步期间的轮询间隔。远小于 taskCheckInterval，使同步完成后立即上报，
     // 不必等满一个任务检测周期。
     std::chrono::milliseconds clockSyncPollInterval{1000};
+
+    // ---- 清单身份 (CCU-FOTA-DSN-CR-012) ----
+    // 变化检测开关：false 时固定复用已接受身份 + DIGEST，由云端失配驱动 FULL。
+    bool inventoryChangeDetectionEnabled = true;
+    // 同一清单身份的重试退避（传输失败/结果未知不得产生新版本）。
+    std::chrono::milliseconds inventoryIdentityRetryBackoff{5000};
+    // 连续 DIGEST 失配上限（防御规范化实现不一致导致抖动）。
+    std::uint32_t inventoryDigestMaxConsecutiveFailures = 3;
 };
 
 struct StepOutcome {
@@ -86,12 +96,16 @@ public:
     // clockSync 为时钟就绪判定来源。传 nullptr 表示不启用时钟门禁（纯状态机单测
     // 用法）；生产装配必须注入，由 FotaDaemon::create 在 requireClockSync=true
     // 时强制校验。
+    // revisionAllocator 为 durable 序号分配器（生产注入
+    // FotaStateStore::allocateSnapshotSeq）。仅当本轮需要新清单版本时调用，
+    // 传空表示无 durable 分配能力（缺少分配器时身份决策 fail-closed）。
     FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv,
                      ConsentProvider& consent, PackageDownloader& dl,
                      VehicleConditionProvider& cond, InstallExecutor& exec,
                      LogCollector& log, store::fota::FotaCloudStateStore& store,
                      FotaOrchestratorConfig cfg,
-                     ClockSyncProvider* clockSync = nullptr);
+                     ClockSyncProvider* clockSync = nullptr,
+                     RevisionAllocator revisionAllocator = nullptr);
 
     // 启动对账恢复：从 durable 状态恢复 VehicleTask/Execution/outbox 水位。
     void reconcileOnStart();
@@ -126,6 +140,7 @@ private:
     store::fota::FotaCloudStateStore& store_;
     FotaOrchestratorConfig cfg_;
     ClockSyncProvider* clockSync_ = nullptr;  // 可为空 = 不启用时钟门禁
+    std::unique_ptr<InventoryIdentityPlanner> planner_;  // 清单身份唯一决策入口
 
     VehicleTaskState vtState_ = VehicleTaskState::None;
     ExecutionState exState_ = ExecutionState::PermitPersisted;
@@ -161,6 +176,17 @@ private:
     void persistVehicleTask(const char* action);
     void persistExecution();
     void loadFromStore();
+
+    // 终态 -> 检测态（CR-012 D8）：终态只结束本次任务，不得终止后续任务检测。
+    // 回到 None 并清理任务/执行记录，保留事件水位与已接受清单身份。
+    void resetTerminalToDetection();
+
+    // 终态对账：终态后第一次 checkTask 携带上一次任务身份与终态
+    // （local_vehicle_task_status），上报完成后清空（只对账一次）。
+    bool terminalReconPending_ = false;
+    std::string lastTerminalTaskId_;
+    std::uint64_t lastTerminalTaskRevision_ = 0;
+    VehicleTaskState lastTerminalState_ = VehicleTaskState::None;
 };
 
 } // namespace ota

@@ -38,13 +38,14 @@ namespace ota {
 // ---------------------------------------------------------------------------
 // InventoryProviderFromAssembler - 生产清单提供者：复用契约 A SnapshotAssembler
 // （DIAG 采集）映射为 vehicle.fota.v1 CollectedInventory（不平行创建第二套采集）。
+// CCU-FOTA-DSN-CR-012：只负责采集 + 稳定排序 + digest + 版本指纹，不决定
+// mode/revision，也不分配序号（Defer）。
 // ---------------------------------------------------------------------------
 class InventoryProviderFromAssembler : public InventoryProvider {
 public:
     InventoryProviderFromAssembler(std::shared_ptr<SnapshotAssembler> assembler,
                                    std::string fotaMasterVersion);
-    CollectedInventory
-    collectInventory(::vehicle::fota::v1::InventoryMode mode) override;
+    CollectedInventory collectInventory() override;
 
 private:
     std::shared_ptr<SnapshotAssembler> assembler_;

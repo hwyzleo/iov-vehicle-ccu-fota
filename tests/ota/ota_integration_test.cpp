@@ -97,8 +97,13 @@ struct MockHarness {
         exec = std::make_unique<MockInstallExecutor>(scenario);
         log = std::make_unique<MockLogCollector>();
         FotaOrchestratorConfig cfg;
-        orch = std::make_unique<FotaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
-                                                  *exec, *log, *cloudStore, cfg);
+        // 测试内不等待同身份退避（退避语义由 planner 单测覆盖）。
+        cfg.inventoryIdentityRetryBackoff = std::chrono::milliseconds(0);
+        // CCU-FOTA-DSN-CR-012：注入 durable revision 分配器（生产由 main.cpp 注入）。
+        orch = std::make_unique<FotaOrchestrator>(
+            *cloud, *inv, *consent, *dl, *cond, *exec, *log, *cloudStore, cfg,
+            /*clockSync=*/nullptr,
+            [this]() { return fotaStore->allocateSnapshotSeq(); });
     }
 
     // 重新装配 orchestrator（模拟重启），复用同一 store。
@@ -113,8 +118,11 @@ struct MockHarness {
         exec = std::make_unique<MockInstallExecutor>(scenario);
         log = std::make_unique<MockLogCollector>();
         FotaOrchestratorConfig cfg;
-        orch = std::make_unique<FotaOrchestrator>(*cloud, *inv, *consent, *dl, *cond,
-                                                  *exec, *log, *cloudStore, cfg);
+        cfg.inventoryIdentityRetryBackoff = std::chrono::milliseconds(0);
+        orch = std::make_unique<FotaOrchestrator>(
+            *cloud, *inv, *consent, *dl, *cond, *exec, *log, *cloudStore, cfg,
+            /*clockSync=*/nullptr,
+            [this]() { return fotaStore->allocateSnapshotSeq(); });
         orch->reconcileOnStart();
     }
 
@@ -236,9 +244,19 @@ TEST(OtaIntegration, ConsentRejectedEnds) {
     MockHarness h;
     h.init(happyScenarioJson());
     h.consent->setRejected(true);
-    auto last = h.runToTerminal(20);
-    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Ended);
-    EXPECT_TRUE(last.terminal);
+
+    // 推进到 ENDED（终态本身不再“永久 terminal”，见 CR-012 D8）。
+    bool ended = false;
+    for (int i = 0; i < 20 && !ended; ++i) {
+        h.orch->step();
+        ended = (h.orch->vehicleTaskState() == VehicleTaskState::Ended);
+    }
+    EXPECT_TRUE(ended);
+
+    // 终态之后回到检测态，继续周期任务检测。
+    auto reset = h.orch->step();
+    EXPECT_EQ(reset.action, "resetToDetection");
+    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::None);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,9 +356,10 @@ TEST(OtaIntegration, ClockSyncGateWithholdsUplinkUntilSynchronized) {
 
     FakeClockSyncProvider clock;  // 初始未同步
     FotaOrchestratorConfig cfg;   // requireClockSync 缺省 true
-    h.orch = std::make_unique<FotaOrchestrator>(*h.cloud, *h.inv, *h.consent, *h.dl,
-                                                *h.cond, *h.exec, *h.log, *h.cloudStore,
-                                                cfg, &clock);
+    cfg.inventoryIdentityRetryBackoff = std::chrono::milliseconds(0);
+    h.orch = std::make_unique<FotaOrchestrator>(
+        *h.cloud, *h.inv, *h.consent, *h.dl, *h.cond, *h.exec, *h.log, *h.cloudStore,
+        cfg, &clock, [&h]() { return h.fotaStore->allocateSnapshotSeq(); });
 
     // 时钟未同步：反复 step 都停在门禁前，状态不推进，云侧收不到任何上行。
     for (int i = 0; i < 3; ++i) {
@@ -371,9 +390,10 @@ TEST(OtaIntegration, ClockSyncGateDisabledKeepsLegacyBehaviour) {
     FakeClockSyncProvider clock;  // 保持未同步
     FotaOrchestratorConfig cfg;
     cfg.requireClockSync = false;  // 实验台：显式关闭门禁
-    h.orch = std::make_unique<FotaOrchestrator>(*h.cloud, *h.inv, *h.consent, *h.dl,
-                                                *h.cond, *h.exec, *h.log, *h.cloudStore,
-                                                cfg, &clock);
+    cfg.inventoryIdentityRetryBackoff = std::chrono::milliseconds(0);
+    h.orch = std::make_unique<FotaOrchestrator>(
+        *h.cloud, *h.inv, *h.consent, *h.dl, *h.cond, *h.exec, *h.log, *h.cloudStore,
+        cfg, &clock, [&h]() { return h.fotaStore->allocateSnapshotSeq(); });
 
     auto o = h.orch->step();
     EXPECT_FALSE(o.awaitingClockSync);

@@ -34,7 +34,8 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
                        std::shared_ptr<InstallExecutor> exec,
                        std::shared_ptr<LogCollector> log,
                        std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
-                       std::shared_ptr<ClockSyncProvider> clockSync)
+                       std::shared_ptr<ClockSyncProvider> clockSync,
+                       RevisionAllocator revisionAllocator)
     : runtime_(runtime)
     , transportCfg_(std::move(transportCfg))
     , orchCfg_(std::move(orchCfg))
@@ -73,7 +74,7 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
     cloud_ = std::make_unique<FotaCloudProxyViaTransport>(*transport_);
     orch_ = std::make_unique<FotaOrchestrator>(
         *cloud_, *inv_, *consent_, *dl_, *cond_, *exec_, *log_, *cloudStore_, orchCfg_,
-        clockSync_.get());
+        clockSync_.get(), std::move(revisionAllocator));
 }
 
 FotaDaemon::~FotaDaemon() { stop(); }
@@ -91,12 +92,13 @@ std::unique_ptr<FotaDaemon> FotaDaemon::create(
     std::shared_ptr<InstallExecutor> exec,
     std::shared_ptr<LogCollector> log,
     std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
-    std::shared_ptr<ClockSyncProvider> clockSync) {
+    std::shared_ptr<ClockSyncProvider> clockSync,
+    RevisionAllocator revisionAllocator) {
     return std::unique_ptr<FotaDaemon>(new FotaDaemon(
         runtime, address, std::move(transportCfg), std::move(orchCfg),
         businessTrigger, std::move(inv), std::move(consent), std::move(dl),
         std::move(cond), std::move(exec), std::move(log), std::move(cloudStore),
-        std::move(clockSync)));
+        std::move(clockSync), std::move(revisionAllocator)));
 }
 
 void FotaDaemon::start() {

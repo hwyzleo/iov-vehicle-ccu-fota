@@ -158,7 +158,10 @@ int main(int argc, char* argv[]) {
         std::move(fwDiagClient), fotaConfig.diagCollectTimeout);
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
-    assembler->setThrottleInterval(static_cast<uint32_t>(fotaConfig.minReportInterval.count()));
+    // CCU-FOTA-DSN-CR-012：契约 B 任务检测路径不再使用“上报节流”抑制采集；
+    // 是否上报由清单身份决策器按内容指纹 + 云端回执决定，min_report_interval_ms
+    // 仍保留在 fota.inventory.* 供旧路径/兼容配置校验。
+    assembler->setThrottleInterval(0);
     assembler->setMaxEcuCount(DEFAULT_MAX_ECU_COUNT);
     assembler->setStateStore(state_store);  // CCU-FOTA-DSN-CR-005: durable 序号分配
     assembler->setDiagRetryPolicy(fotaConfig.diagRetry.maxAttempts,
@@ -285,13 +288,27 @@ int main(int argc, char* argv[]) {
             orch_cfg.requireClockSync = fotaConfig.cloud.requireClockSync;
             orch_cfg.clockSyncPollInterval = fotaConfig.cloud.clockSyncPollInterval;
 
+            // ---- 清单身份 (CCU-FOTA-DSN-CR-012) ----
+            orch_cfg.inventoryChangeDetectionEnabled =
+                fotaConfig.changeDetectionEnabled;
+            orch_cfg.inventoryIdentityRetryBackoff =
+                fotaConfig.inventoryIdentityRetryBackoff;
+            orch_cfg.inventoryDigestMaxConsecutiveFailures =
+                fotaConfig.inventoryDigestMaxConsecutiveFailures;
+            // durable revision 分配器：只在本轮需要新清单版本（FULL）时调用，
+            // 与 CR-005 的 inventory.sequence 语义一致（允许间隙、不退、不复用）。
+            auto revision_allocator = [state_store]() {
+                return state_store->allocateSnapshotSeq();
+            };
+
             fota_daemon = ccu_fota::daemon::FotaDaemon::create(
                 runtime, tbox_generic_addr, fotaConfig.transport, orch_cfg,
                 /*businessTrigger=*/fotaConfig.cloud.enabled,
                 std::move(prod_inv), std::move(prod_consent),
                 std::move(prod_dl), std::move(prod_cond),
                 std::move(prod_exec), std::move(prod_log),
-                cloud_state_store, std::move(prod_clock));
+                cloud_state_store, std::move(prod_clock),
+                std::move(revision_allocator));
             fota_daemon->start();  // transport -> 下行订阅 -> reconcile -> 触发
 
             FotaLogAdapter::orchestrator().info(

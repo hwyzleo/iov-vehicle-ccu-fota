@@ -82,6 +82,40 @@ TEST_F(SnapshotAssemblerTest, AssembleSnapshotWithSeqIncrement) {
     EXPECT_EQ(result2.snapshot_seq, 2);
 }
 
+// CCU-FOTA-DSN-CR-012 D2：Defer 策略下采集阶段不得分配序号。
+TEST_F(SnapshotAssemblerTest, DeferPolicyDoesNotAllocateSequence) {
+    auto mock_client = std::make_shared<MockDiagInventoryClient>();
+
+    VehicleSoftwareSnapshot expected;
+    expected.vin = "12345678901234567";
+    expected.overall_result = CollectionStatus::ALL_OK;
+
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
+        .Times(3)
+        .WillRepeatedly(Invoke([&expected](VehicleSoftwareSnapshot& s) {
+            s = expected;
+            return true;
+        }));
+
+    SnapshotAssembler assembler(mock_client);
+    assembler.setThrottleInterval(0);
+    for (int i = 0; i < 3; ++i) {
+        VehicleSoftwareSnapshot snap;
+        ASSERT_TRUE(assembler.assembleSnapshot(snap, SeqPolicy::Defer));
+        EXPECT_EQ(snap.snapshot_seq, 0u) << "iteration " << i;
+    }
+
+    // Allocate 策略行为保持不变（兼容旧启动自动上报路径）。
+    EXPECT_CALL(*mock_client, collectVehicleInventory(_))
+        .WillOnce(Invoke([&expected](VehicleSoftwareSnapshot& s) {
+            s = expected;
+            return true;
+        }));
+    VehicleSoftwareSnapshot alloc;
+    ASSERT_TRUE(assembler.assembleSnapshot(alloc, SeqPolicy::Allocate));
+    EXPECT_EQ(alloc.snapshot_seq, 1u);
+}
+
 TEST_F(SnapshotAssemblerTest, AssembleSnapshotFailure) {
     auto mock_client = std::make_shared<MockDiagInventoryClient>();
 

@@ -104,6 +104,9 @@ struct FotaConfig {
     bool changeDetectionEnabled;
     std::chrono::milliseconds minReportInterval;
     std::uint32_t maxPendingRequests;
+    // 清单身份（CCU-FOTA-DSN-CR-012）
+    std::chrono::milliseconds inventoryIdentityRetryBackoff;
+    std::uint32_t inventoryDigestMaxConsecutiveFailures;
     // dedupe 边界 (CCU-FOTA-DSN-CR-005)
     std::uint32_t dedupeMaxEntries;
     std::int64_t dedupeTtlMs;

@@ -7,6 +7,8 @@
 #include "ccu/fota/ota/state/state_proto.hpp"
 #include "ccu/fota/store/fota_cloud_state_serializer.hpp"
 
+#include "fota_log_adapter.h"
+
 #include <algorithm>
 #include <chrono>
 #include <sstream>
@@ -28,10 +30,19 @@ FotaOrchestrator::FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv
                                    VehicleConditionProvider& cond, InstallExecutor& exec,
                                    LogCollector& log, store::fota::FotaCloudStateStore& store,
                                    FotaOrchestratorConfig cfg,
-                                   ClockSyncProvider* clockSync)
+                                   ClockSyncProvider* clockSync,
+                                   RevisionAllocator revisionAllocator)
     : cloud_(cloud), inv_(inv), consent_(consent), dl_(dl), cond_(cond),
       exec_(exec), log_(log), store_(store), cfg_(std::move(cfg)),
-      clockSync_(clockSync) {}
+      clockSync_(clockSync) {
+    // CR-012：清单身份决策器（唯一分配 revision 与决定 FULL/DIGEST 的入口）。
+    InventoryIdentityConfig icfg;
+    icfg.retryBackoff = cfg_.inventoryIdentityRetryBackoff;
+    icfg.digestMaxConsecutiveFailures = cfg_.inventoryDigestMaxConsecutiveFailures;
+    icfg.changeDetectionEnabled = cfg_.inventoryChangeDetectionEnabled;
+    planner_ = std::make_unique<InventoryIdentityPlanner>(
+        store_, std::move(revisionAllocator), icfg);
+}
 
 CallContext FotaOrchestrator::makeCtx(const std::string& idempotencyKey) const {
     CallContext ctx;
@@ -141,6 +152,37 @@ void FotaOrchestrator::loadFromStore() {
 void FotaOrchestrator::reconcileOnStart() { loadFromStore(); }
 
 // ---------------------------------------------------------------------------
+// CR-012 D8：终态 -> 检测态。
+// 终态上报已在上一步 durable 完成；这里回到 None 继续周期任务检测，并清理
+// 任务/执行记录（保留事件水位与已接受清单身份）。下载上下文不在此清理，
+// packageCacheAction 语义仍由云端任务响应决定。
+// ---------------------------------------------------------------------------
+void FotaOrchestrator::resetTerminalToDetection() {
+    // 保留一次终态对账身份（下一次 checkTask 携带 local_vehicle_task_status）。
+    if (!frozenTask_.vehicle_task_id().empty()) {
+        lastTerminalTaskId_ = frozenTask_.vehicle_task_id();
+        lastTerminalTaskRevision_ = frozenTask_.task_revision();
+        lastTerminalState_ = vtState_;
+        terminalReconPending_ = true;
+    }
+    vtState_ = VehicleTaskState::None;
+    exState_ = ExecutionState::PermitPersisted;
+    frozenTask_.Clear();
+    permit_.Clear();
+    executionId_.clear();
+    attemptNo_ = 0;
+    lastReceivedControlRev_ = 0;
+    lastAppliedControlRev_ = 0;
+    pendingControlIds_.clear();
+    try {
+        store_.removeVehicleTask();
+        store_.removeExecution();
+    } catch (const std::exception&) {
+        // 清理失败不阻断检测：下次 start 的 loadFromStore 仍会保守恢复。
+    }
+}
+
+// ---------------------------------------------------------------------------
 // EventSink: 先 durable 写 outbox 单条 + 推进水位 meta，再分配 sequenceNo
 // ---------------------------------------------------------------------------
 bool FotaOrchestrator::emit(const ::vehicle::fota::v1::ExecutionEvent& evt) {
@@ -199,8 +241,12 @@ StepOutcome FotaOrchestrator::step() {
     o.vehicleTaskState = vtState_;
     o.executionState = exState_;
     if (isTerminalVehicleTaskState(vtState_)) {
-        o.terminal = true;
-        o.action = "terminal";
+        // CR-012 D8：终态只结束本次任务，不得终止后续任务探测。
+        // 终态同上一步已上报并 durable；本步回到检测态并清理任务/执行记录。
+        resetTerminalToDetection();
+        o.action = "resetToDetection";
+        o.vehicleTaskState = vtState_;
+        o.executionState = exState_;
         return o;
     }
     // 任何上行之前先过时钟门禁（覆盖启动期首次版本/清单上报与后续全部阶段）。
@@ -241,19 +287,91 @@ StepOutcome FotaOrchestrator::step() {
 StepOutcome FotaOrchestrator::doCheckTask() {
     StepOutcome o;
     o.action = "checkTask";
-    auto inv = inv_.collectInventory(::vehicle::fota::v1::INVENTORY_MODE_FULL);
+
+    // CR-012：同一身份重试退避中 -> 本轮不采集/不上报（不计新版本）。
+    if (planner_ && !planner_->retryReady(nowMs())) {
+        o.action = "inventoryRetryWait";
+        o.vehicleTaskState = vtState_;
+        return o;
+    }
+
+    // 采集（Defer：采集阶段不得分配 revision；失败/空清单不上报）。
+    auto inv = inv_.collectInventory();
+    if (!inv.collected || inv.ecuList.empty()) {
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::INVENTORY_COLLECT_EMPTY,
+            "Inventory collect failed or empty, uplink skipped",
+            {flog::f_str("error_code", "FOTA-INVENTORY-COLLECT-EMPTY")});
+        o.error = "inventory collect failed or empty";
+        return o;
+    }
+
+    // 清单身份决策 + PREPARED 检查点（durable，必须先于云端调用）。
+    InventoryIdentity ident;
+    FotaInventoryRecord prepared;
+    try {
+        ident = planner_->resolve(inv);
+        prepared = planner_->markPrepared(inv, ident);
+    } catch (const std::exception& e) {
+        FotaLogAdapter::orchestrator().error(
+            fota_events::INVENTORY_IDENTITY_FAILED,
+            "Inventory identity unavailable, uplink blocked",
+            {flog::f_str("error_code", "FOTA-INVENTORY-IDENTITY-UNAVAILABLE"),
+             flog::f_str("reason", inventoryChangeReasonToString(ident.reason))});
+        o.error = std::string("inventory identity unavailable: ") + e.what();
+        return o;
+    }
+
     ::vehicle::fota::v1::TaskCheckRequest req;
     req.set_baseline_code(inv.baselineCode);
     req.set_fota_master_version(inv.fotaMasterVersion);
-    if (!frozenTask_.vehicle_task_id().empty()) {
+    if (terminalReconPending_ && !lastTerminalTaskId_.empty()) {
+        // CR-012 D8：终态后首次检测携带上一次任务身份与终态，仅供云端对账。
+        req.set_local_vehicle_task_id(lastTerminalTaskId_);
+        req.set_local_task_revision(lastTerminalTaskRevision_);
+        req.set_local_vehicle_task_status(toProto(lastTerminalState_));
+    } else if (!frozenTask_.vehicle_task_id().empty()) {
         req.set_local_vehicle_task_id(frozenTask_.vehicle_task_id());
         req.set_local_task_revision(frozenTask_.task_revision());
         req.set_local_vehicle_task_status(toProto(vtState_));
     }
-    req.set_inventory_mode(::vehicle::fota::v1::INVENTORY_MODE_FULL);
-    req.set_inventory_revision(inv.inventoryRevision);
-    *req.mutable_ecu_list_digest() = inv.ecuListDigest;
-    for (const auto& ecu : inv.ecuList) *req.add_ecu_list() = ecu;
+    req.set_inventory_mode(ident.mode);
+    req.set_inventory_revision(prepared.inventoryRevision);
+    req.mutable_ecu_list_digest()->set_algorithm(prepared.algorithm);
+    req.mutable_ecu_list_digest()->set_value_hex(prepared.ecuListDigestHex);
+    // CR-012 D5：FULL 携带列表，DIGEST 只发送身份（revision/algorithm/digest）。
+    if (ident.mode == ::vehicle::fota::v1::INVENTORY_MODE_FULL) {
+        for (const auto& ecu : inv.ecuList) *req.add_ecu_list() = ecu;
+    }
+
+    std::string reqBin;
+    req.SerializeToString(&reqBin);
+    try {
+        planner_->saveRequestPayload(prepared, protoBinaryToHex(reqBin));
+    } catch (const std::exception& e) {
+        o.error = std::string("inventory prepared checkpoint failed: ") + e.what();
+        return o;
+    }
+
+    FotaLogAdapter::orchestrator().info(
+        fota_events::INVENTORY_FINGERPRINT_COMPARED,
+        "Inventory content fingerprint compared",
+        {flog::f_str("fingerprint_canonicalization", inv.fingerprintCanonicalization),
+         flog::f_bool("changed", ident.reason == InventoryChangeReason::FirstBaseline ||
+                                  ident.reason == InventoryChangeReason::ContentChanged),
+         flog::f_str("change_reason", inventoryChangeReasonToString(ident.reason))});
+
+    FotaLogAdapter::orchestrator().info(
+        ident.freshRevision ? fota_events::INVENTORY_REVISION_ALLOCATED
+                            : fota_events::INVENTORY_REVISION_REUSED,
+        "Inventory identity resolved for task check",
+        {flog::f_int("inventory_revision", static_cast<int64_t>(prepared.inventoryRevision)),
+         flog::f_str("inventory_mode", prepared.mode),
+         flog::f_str("algorithm", prepared.algorithm),
+         flog::f_str("digest", prepared.ecuListDigestHex),
+         flog::f_str("fingerprint_canonicalization", inv.fingerprintCanonicalization),
+         flog::f_str("change_reason", inventoryChangeReasonToString(ident.reason)),
+         flog::f_int("attempt", static_cast<int64_t>(prepared.attempt))});
 
     ::vehicle::fota::v1::TaskCheckResponse resp;
     try {
@@ -264,36 +382,71 @@ StepOutcome FotaOrchestrator::doCheckTask() {
         resp = cloud_.checkTask(
             req, makeCtx("checkTask-" + (localTaskId.empty() ? "initial" : localTaskId)));
     } catch (const FotaCloudException& e) {
+        // 结果未知：保持 PREPARED，同身份退避重试（不得新分配 revision）。
+        try {
+            planner_->onTransportFailure(ident, "FOTA-INVENTORY-TRANSPORT");
+        } catch (const std::exception&) {
+            // durable 写失败不阻断传输错误上报；下轮按 PREPARED 重试。
+        }
         o.error = e.what();
         o.transportFailed = true;
         return o;
     }
 
+    // 终态对账身份已随请求上送（只对账一次；失败时保留由下次重试继续携带）。
+    terminalReconPending_ = false;
+    lastTerminalTaskId_.clear();
+    lastTerminalTaskRevision_ = 0;
+    lastTerminalState_ = VehicleTaskState::None;
+
     if (resp.inventory_disposition() != ::vehicle::fota::v1::INVENTORY_DISPOSITION_ACCEPTED) {
-        // FULL_REQUIRED/REVISION_CONFLICT/DIGEST_MISMATCH/... -> 记录要求，下次 FULL
-        FotaInventoryRecord ir;
-        ir.mode = "FULL";
-        ir.inventoryRevision = inv.inventoryRevision;
-        ir.algorithm = inv.ecuListDigest.algorithm();
-        ir.ecuListDigestHex = inv.ecuListDigest.value_hex();
-        ir.baselineCode = inv.baselineCode;
-        ir.fotaMasterVersion = inv.fotaMasterVersion;
-        ir.collectedAtMs = nowMs();
-        std::string bin;
-        req.SerializeToString(&bin);
-        ir.requestPbHex = protoBinaryToHex(bin);
-        ir.fullRequired = true;
-        store_.saveInventory(ir);
+        // FULL_REQUIRED/REVISION_CONFLICT/DIGEST_MISMATCH/ALGORITHM_UNSUPPORTED
+        // -> durable 记录要求与失配原因，按决策矩阵决定下一轮 mode/revision。
+        try {
+            planner_->onRejected(ident, resp);
+        } catch (const std::exception& e) {
+            o.error = std::string("inventory disposition persist failed: ") + e.what();
+            return o;
+        }
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::INVENTORY_DISPOSITION,
+            "Inventory not accepted by cloud",
+            {flog::f_str("inventory_disposition",
+                         ::vehicle::fota::v1::InventoryDisposition_Name(
+                             resp.inventory_disposition())),
+             flog::f_int("inventory_revision", static_cast<int64_t>(prepared.inventoryRevision)),
+             flog::f_str("inventory_mode", prepared.mode)});
         o.error = "inventory not accepted: " +
                   ::vehicle::fota::v1::InventoryDisposition_Name(resp.inventory_disposition());
         return o;
     }
 
-    // 冻结任务快照（VehicleTaskSnapshot）
-    if (!resp.has_task()) {
-        o.error = "task missing while inventory accepted";
+    try {
+        planner_->onAccepted(ident, resp);
+    } catch (const std::exception& e) {
+        // 未落盘则下轮仍按 PREPARED 复用同一身份（不会新分配），可安全重试。
+        o.error = std::string("inventory accepted state persist failed: ") + e.what();
         return o;
     }
+    FotaLogAdapter::orchestrator().info(
+        fota_events::INVENTORY_DISPOSITION,
+        "Inventory accepted by cloud",
+        {flog::f_str("inventory_disposition", "INVENTORY_DISPOSITION_ACCEPTED"),
+         flog::f_int("inventory_revision", static_cast<int64_t>(prepared.inventoryRevision)),
+         flog::f_int("accepted_inventory_revision",
+                     static_cast<int64_t>(resp.has_accepted_inventory_revision()
+                                              ? resp.accepted_inventory_revision()
+                                              : prepared.inventoryRevision)),
+         flog::f_str("inventory_mode", prepared.mode)});
+
+    // 无任务不是错误（CR-012）：本轮检测完成，下轮内容未变则走 DIGEST。
+    if (!resp.has_task()) {
+        o.action = "checkTaskIdle";
+        o.vehicleTaskState = vtState_;
+        return o;
+    }
+
+    // 冻结任务快照（VehicleTaskSnapshot）——只在 inventoryDisposition=ACCEPTED 后。
     frozenTask_ = resp.task();
     vtState_ = VehicleTaskState::Discovered;
     persistVehicleTask("checkTask");

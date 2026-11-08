@@ -116,31 +116,84 @@ FotaVehicleTaskRecord decodeVehicleTask(const std::string& bytes) {
 std::string encodeInventory(const FotaInventoryRecord& r) {
     json j = json{
         {"schemaVersion", r.schemaVersion},
+        {"status", r.status},
         {"mode", r.mode},
         {"inventoryRevision", r.inventoryRevision},
+        {"acceptedInventoryRevision", r.acceptedInventoryRevision},
+        {"requiredMode", r.requiredMode},
         {"algorithm", r.algorithm},
         {"ecuListDigestHex", r.ecuListDigestHex},
+        {"fingerprintCanonicalization", r.fingerprintCanonicalization},
+        {"fingerprintHex", r.fingerprintHex},
         {"baselineCode", r.baselineCode},
         {"fotaMasterVersion", r.fotaMasterVersion},
         {"collectedAtMs", r.collectedAtMs},
         {"requestPbHex", r.requestPbHex},
+        {"attempt", r.attempt},
+        {"nextRetryAtMs", r.nextRetryAtMs},
+        {"lastErrorCode", r.lastErrorCode},
+        {"digestFailures", r.digestFailures},
         {"fullRequired", r.fullRequired}};
     return encodeEnvelope(r.schemaVersion, j.dump());
 }
 
-FotaInventoryRecord decodeInventory(const std::string& bytes) {
-    json j = decodeEnvelopeJson(bytes, schema::INVENTORY_VERSION, "inventory");
+// fota.inventory v1 -> v2 迁移（CCU-FOTA-DSN-CR-012 §迁移）。
+// v1 无 status/fingerprint：旧实现只在云端拒绝时写入且 fullRequired=true。
+// 迁移后 fingerprintHex 为空 => 身份不可用 => 下一次检测保守 FULL 建基线，
+// 但保留已分配 revision（不回退、不清零）。
+FotaInventoryRecord decodeInventoryV1(const json& j) {
     FotaInventoryRecord r;
-    r.schemaVersion = j.value("schemaVersion", schema::INVENTORY_VERSION);
-    r.mode = getStr(j, "mode");
-    r.inventoryRevision = j.at("inventoryRevision").get<std::uint64_t>();
-    r.algorithm = getStr(j, "algorithm");
-    r.ecuListDigestHex = getStr(j, "ecuListDigestHex");
+    r.schemaVersion = schema::INVENTORY_VERSION;
+    r.inventoryRevision = j.value("inventoryRevision", std::uint64_t{0});
+    r.algorithm = getStrOpt(j, "algorithm", "sha-256");
+    r.ecuListDigestHex = getStrOpt(j, "ecuListDigestHex", "");
     r.baselineCode = getStrOpt(j, "baselineCode", "");
     r.fotaMasterVersion = getStrOpt(j, "fotaMasterVersion", "");
-    r.collectedAtMs = j.at("collectedAtMs").get<Timestamp>();
+    r.collectedAtMs = j.value("collectedAtMs", Timestamp(0));
     r.requestPbHex = getStrOpt(j, "requestPbHex", "");
     r.fullRequired = j.value("fullRequired", false);
+    r.mode = getStrOpt(j, "mode", r.fullRequired ? "FULL" : "DIGEST");
+    r.status = r.fullRequired ? "REQUIRED_FULL" : "PREPARED";
+    r.requiredMode = r.fullRequired ? "FULL" : "";
+    // fingerprint 留空：v1 无内容指纹，不得伪造。
+    return r;
+}
+
+FotaInventoryRecord decodeInventory(const std::string& bytes) {
+    EnvelopeHeader h = parseEnvelopeHeader(bytes);
+    if (h.schemaVersion > schema::INVENTORY_VERSION) {
+        throw StateDecodeError("inventory unknown newer schemaVersion: " +
+                               std::to_string(h.schemaVersion));
+    }
+    std::string payload = extractPayload(bytes, h);
+    json j;
+    try {
+        j = json::parse(payload);
+    } catch (const json::exception& e) {
+        throw StateDecodeError(std::string("inventory json parse failed: ") + e.what());
+    }
+    if (h.schemaVersion <= 1) return decodeInventoryV1(j);
+
+    FotaInventoryRecord r;
+    r.schemaVersion = schema::INVENTORY_VERSION;
+    r.status = getStrOpt(j, "status", "PREPARED");
+    r.mode = getStr(j, "mode");
+    r.inventoryRevision = j.at("inventoryRevision").get<std::uint64_t>();
+    r.acceptedInventoryRevision = j.value("acceptedInventoryRevision", std::uint64_t{0});
+    r.requiredMode = getStrOpt(j, "requiredMode", "");
+    r.algorithm = getStrOpt(j, "algorithm", "sha-256");
+    r.ecuListDigestHex = getStrOpt(j, "ecuListDigestHex", "");
+    r.fingerprintCanonicalization = getStrOpt(j, "fingerprintCanonicalization", "");
+    r.fingerprintHex = getStrOpt(j, "fingerprintHex", "");
+    r.baselineCode = getStrOpt(j, "baselineCode", "");
+    r.fotaMasterVersion = getStrOpt(j, "fotaMasterVersion", "");
+    r.collectedAtMs = j.value("collectedAtMs", Timestamp(0));
+    r.requestPbHex = getStrOpt(j, "requestPbHex", "");
+    r.attempt = j.value("attempt", std::uint32_t{0});
+    r.nextRetryAtMs = j.value("nextRetryAtMs", Timestamp(0));
+    r.lastErrorCode = getStrOpt(j, "lastErrorCode", "");
+    r.digestFailures = j.value("digestFailures", std::uint32_t{0});
+    r.fullRequired = j.value("fullRequired", r.requiredMode == "FULL");
     return r;
 }
 

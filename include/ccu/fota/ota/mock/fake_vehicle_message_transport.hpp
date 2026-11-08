@@ -78,6 +78,20 @@ public:
     std::uint64_t publishCount() const { return publishCount_.load(); }
     std::size_t activeSubscriberCount() const;
 
+    // ---- 清单记账（CCU-FOTA-DSN-CR-012：云端“一个 revision 一条 FULL”）----
+    // 云端只在收到 FULL 时建立/替换清单版本；DIGEST 只有同 revision + 同摘要
+    // 才 ACCEPTED，否则返回 DIGEST_MISMATCH（不新增版本）。
+    std::uint64_t inventoryFullCount() const { return inventoryFullCount_.load(); }
+    std::uint64_t inventoryDigestCount() const { return inventoryDigestCount_.load(); }
+    std::uint64_t inventoryDigestMismatchCount() const {
+        return inventoryDigestMismatchCount_.load();
+    }
+    // 云端已建立的清单版本个数（按 revision 去重）。
+    std::size_t inventoryVersionCount() const;
+    std::uint64_t cloudInventoryRevision() const;
+    // 最后一次 TaskCheck 请求（用于断言 mode/revision/local status）。
+    ::vehicle::fota::v1::TaskCheckRequest lastTaskCheck() const;
+
 private:
     ScenarioScript scenario_;
 
@@ -100,6 +114,17 @@ private:
     bool eventDroppedOnce_ = false;
     bool eventReorderOnce_ = false;
     bool cloudTimeoutOnce_ = false;
+
+    // 清单记账状态（CR-012）。
+    mutable std::mutex inventoryMutex_;
+    std::atomic<std::uint64_t> inventoryFullCount_{0};
+    std::atomic<std::uint64_t> inventoryDigestCount_{0};
+    std::atomic<std::uint64_t> inventoryDigestMismatchCount_{0};
+    bool cloudHasInventory_ = false;
+    std::uint64_t cloudInventoryRevision_ = 0;
+    std::string cloudInventoryDigest_;
+    std::vector<std::uint64_t> inventoryRevisions_;
+    ::vehicle::fota::v1::TaskCheckRequest lastTaskCheck_;
 
     static std::int64_t nowMs();
 
@@ -254,6 +279,22 @@ inline std::size_t FakeVehicleMessageTransport::activeSubscriberCount() const {
         [](const auto& e) { return static_cast<bool>(e.second); }));
 }
 
+inline std::size_t FakeVehicleMessageTransport::inventoryVersionCount() const {
+    std::lock_guard<std::mutex> lock(inventoryMutex_);
+    return inventoryRevisions_.size();
+}
+
+inline std::uint64_t FakeVehicleMessageTransport::cloudInventoryRevision() const {
+    std::lock_guard<std::mutex> lock(inventoryMutex_);
+    return cloudInventoryRevision_;
+}
+
+inline ::vehicle::fota::v1::TaskCheckRequest
+FakeVehicleMessageTransport::lastTaskCheck() const {
+    std::lock_guard<std::mutex> lock(inventoryMutex_);
+    return lastTaskCheck_;
+}
+
 inline void FakeVehicleMessageTransport::registerPayloadHandler(std::string ptype,
                                                                 PayloadHandler handler) {
     extraHandlers_[std::move(ptype)] = std::move(handler);
@@ -340,7 +381,8 @@ inline TransportResult<VehicleMessage> FakeVehicleMessageTransport::dispatch(
 // 云侧端点业务 handlers（vehicle.fota.v1）
 // ===========================================================================
 inline ::vehicle::fota::v1::TaskCheckResponse
-FakeVehicleMessageTransport::handleTaskCheck(const ::vehicle::fota::v1::TaskCheckRequest&) {
+FakeVehicleMessageTransport::handleTaskCheck(
+    const ::vehicle::fota::v1::TaskCheckRequest& req) {
     using namespace ::vehicle::fota::v1;
     TaskCheckResponse resp;
     resp.mutable_status()->set_code("0");
@@ -349,13 +391,49 @@ FakeVehicleMessageTransport::handleTaskCheck(const ::vehicle::fota::v1::TaskChec
         resp.set_availability_status(AVAILABILITY_STATUS_NOT_RELEASED);
         return resp;
     }
+
+    // ---- 清单记账（CCU-FOTA-DSN-CR-012）----
+    const std::string digest = req.has_ecu_list_digest()
+                                   ? req.ecu_list_digest().value_hex()
+                                   : std::string();
+    {
+        std::lock_guard<std::mutex> lock(inventoryMutex_);
+        lastTaskCheck_ = req;
+        if (req.inventory_mode() == INVENTORY_MODE_DIGEST) {
+            inventoryDigestCount_.fetch_add(1);
+            const bool matched = cloudHasInventory_ &&
+                                 req.inventory_revision() == cloudInventoryRevision_ &&
+                                 digest == cloudInventoryDigest_;
+            if (!matched) {
+                inventoryDigestMismatchCount_.fetch_add(1);
+                resp.set_inventory_disposition(INVENTORY_DISPOSITION_DIGEST_MISMATCH);
+                return resp;
+            }
+        } else {
+            inventoryFullCount_.fetch_add(1);
+            if (!cloudHasInventory_ ||
+                req.inventory_revision() != cloudInventoryRevision_) {
+                inventoryRevisions_.push_back(req.inventory_revision());
+            }
+            cloudHasInventory_ = true;
+            cloudInventoryRevision_ = req.inventory_revision();
+            cloudInventoryDigest_ = digest;
+        }
+    }
+
     resp.set_inventory_disposition(INVENTORY_DISPOSITION_ACCEPTED);
-    resp.set_accepted_inventory_revision(1);
+    resp.set_accepted_inventory_revision(req.inventory_revision());
+    resp.add_supported_inventory_digest_algorithms("sha-256");
     resp.set_availability_status(AVAILABILITY_STATUS_AVAILABLE);
     resp.set_local_task_disposition("NONE");
     resp.set_package_cache_action("NONE");
     resp.set_download_allowed(true);
     resp.set_install_request_allowed(true);
+    // 无任务场景（CR-012：无任务是正常结果，不得当作错误）。
+    if (scenario_.hasFault("inventory_no_task")) {
+        resp.set_vehicle_task_status(VEHICLE_TASK_STATUS_UNSPECIFIED);
+        return resp;
+    }
     resp.set_vehicle_task_status(VEHICLE_TASK_STATUS_DISCOVERED);
     auto* task = resp.mutable_task();
     task->set_activity_id("ACT-001");

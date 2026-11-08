@@ -29,6 +29,8 @@
 #include "vehicle/fota/v1/task.pb.h"
 #include "vehicle/fota/v1/types.pb.h"
 
+#include <ccu/fw/hash/sha256.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -40,38 +42,51 @@ namespace ota {
 namespace mock {
 
 // ---------------------------------------------------------------------------
-// MockInventoryProvider - 按 scenario 产生 FULL 清单
+// MockInventoryProvider - 产生稳定内容清单（不决定 mode/revision，CR-012）
 // ---------------------------------------------------------------------------
 class MockInventoryProvider : public InventoryProvider {
 public:
     explicit MockInventoryProvider(ScenarioScript s) : scenario_(std::move(s)) {}
 
-    CollectedInventory
-    collectInventory(::vehicle::fota::v1::InventoryMode mode) override {
+    CollectedInventory collectInventory() override {
         CollectedInventory info;
-        info.mode = mode;
-        info.inventoryRevision = 1;
-        info.baselineCode = scenario_.baseline;
         info.fotaMasterVersion = scenario_.fotaMasterVersion;
         info.collectedAtMs = nowMs_;
+        info.baselineCode = scenario_.baseline;
+        if (!available_) return info;  // 采集失败：collected=false
+
+        ::vehicle::fota::v1::EcuVersion e;
+        e.set_ecu_id("VCU-001");
+        e.set_hardware_part_number(hwVersion_);
+        e.set_software_part_number("S-VCU-001");
+        e.set_sw_version(swVersion_);
+        info.ecuList.push_back(e);
+
+        // 稳定规范化：与生产实现同构的确定性输入（Mock 仅用于测试）。
+        const std::string canon = std::string("mock-ecu-list-v1|") + e.ecu_id() +
+                                  "|" + hwVersion_ + "|" +
+                                  e.software_part_number() + "|" + swVersion_;
         info.ecuListDigest.set_algorithm("sha-256");
-        info.ecuListDigest.set_value_hex(std::string(64, 'a'));
-        if (mode == ::vehicle::fota::v1::INVENTORY_MODE_FULL) {
-            ::vehicle::fota::v1::EcuVersion e;
-            e.set_ecu_id("VCU-001");
-            e.set_hardware_part_number("P-VCU-001");
-            e.set_software_part_number("S-VCU-001");
-            e.set_sw_version("1.0.0");
-            info.ecuList.push_back(std::move(e));
-        }
+        info.ecuListDigest.set_value_hex(ccu::fw::hash::sha256_hex(canon));
+        info.fingerprintCanonicalization = "cgw-fota-version-v1";
+        info.fingerprintHex = ccu::fw::hash::sha256_hex(
+            canon + "|fp|" + scenario_.baseline + "|" + scenario_.fotaMasterVersion);
+        info.collected = true;
         return info;
     }
 
+    // 测试钩子：模拟 ECU 软件版本变化（内容指纹随之变化）。
+    void setSoftwareVersion(std::string v) { swVersion_ = std::move(v); }
+    // 测试钩子：模拟采集失败/空清单（上游 DIAG 不可达）。
+    void setAvailable(bool available) { available_ = available; }
     void advanceClock(std::int64_t ms) { nowMs_ = ms; }
 
 private:
     ScenarioScript scenario_;
     std::int64_t nowMs_ = 1000;
+    std::string hwVersion_ = "P-VCU-001";
+    std::string swVersion_ = "1.0.0";
+    bool available_ = true;
 };
 
 // ---------------------------------------------------------------------------
