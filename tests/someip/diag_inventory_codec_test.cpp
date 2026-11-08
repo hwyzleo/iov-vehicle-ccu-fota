@@ -3,9 +3,9 @@
 // CCU-DIAG 清单 payload 解码器单元测试 (CCU-FOTA-DSN-CR-013 §测试矩阵 单元 1
 //                                          / CCU-FOTA-DSN-CR-014 D1)
 // -----------------------------------------------------------------------------
-// 覆盖：payload v1/v2 解码（v2 独立软件件号）、serialNumber 不进入件号字段、
-// 字段名 camelCase/snake_case 别名、缺字段、空 ecuList、未知 schemaVersion、
-// 非法枚举、重复 ecuId、非 JSON -> 全部 fail-closed。
+// 覆盖：payload v1/v2 解码（v1 携带增量 softwarePartNumber 照常解码）、
+// serialNumber 不进入件号字段、字段名 camelCase/snake_case 别名、缺字段、
+// 空 ecuList、未知 schemaVersion、非法枚举、重复 ecuId、非 JSON -> 全部 fail-closed。
 // =============================================================================
 
 #include "ccu/fota/someip/diag_inventory_codec.hpp"
@@ -224,8 +224,8 @@ TEST(DiagInventoryCodec, PayloadV2EmptySoftwarePartNumberIsMissing) {
     EXPECT_EQ(*r.snapshot.ecu_list[0].part_number, "PN-BMS");
 }
 
-// payload v1：字段集冻结，无软件件号 => 保持缺失（即使对端意外提供也不读取）。
-TEST(DiagInventoryCodec, PayloadV1NeverPopulatesSoftwarePartNumber) {
+// payload v1：字段集里没有软件件号 => 保持缺失（不得用 partNumber 补齐）。
+TEST(DiagInventoryCodec, PayloadV1MissingSoftwarePartNumberStaysMissing) {
     auto r = DiagInventoryCodec::decode(validPayload());
     ASSERT_TRUE(r.ok) << r.errorCode << " " << r.errorDetail;
     ASSERT_EQ(r.snapshot.ecu_list.size(), 2u);
@@ -236,14 +236,19 @@ TEST(DiagInventoryCodec, PayloadV1NeverPopulatesSoftwarePartNumber) {
     EXPECT_EQ(*r.snapshot.ecu_list[0].part_number, "PN-BMS");
 }
 
-TEST(DiagInventoryCodec, PayloadV1IgnoresUnexpectedSoftwarePartNumber) {
+// payload v1 携带增量 softwarePartNumber（当前 CCU-DIAG 的实际形态）：照常解码。
+TEST(DiagInventoryCodec, PayloadV1ReadsAdditiveSoftwarePartNumber) {
     std::string payload = validPayload();
     replaceOnce(payload, "\"partNumber\":\"PN-BMS\"",
                 "\"partNumber\":\"PN-BMS\",\"softwarePartNumber\":\"SW-BMS\"");
     auto r = DiagInventoryCodec::decode(payload);
     ASSERT_TRUE(r.ok) << r.errorCode;
-    // v1 不解码该字段：保持缺失，不建立跨版本兜底语义。
-    EXPECT_FALSE(r.snapshot.ecu_list[0].software_part_number.has_value());
+    ASSERT_TRUE(r.snapshot.ecu_list[0].software_part_number.has_value());
+    EXPECT_EQ(*r.snapshot.ecu_list[0].software_part_number, "SW-BMS");
+    // 不得交叉赋值：总成件号仍是总成件号。
+    EXPECT_EQ(*r.snapshot.ecu_list[0].part_number, "PN-BMS");
+    // 未提供该字段的 ECU 保持缺失（不跨 ECU 兜底）。
+    EXPECT_FALSE(r.snapshot.ecu_list[1].software_part_number.has_value());
 }
 
 // serialNumber 类型非法 -> fail-closed（字段仍然要结构化校验）。

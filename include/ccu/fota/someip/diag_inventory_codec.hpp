@@ -9,10 +9,11 @@
 //
 // 编码版本（CCU-FOTA-DSN-CR-014 D1 与 CCU-DIAG-DSN-CR-012 §5.2）：
 //   * schemaVersion=1：版本化 JSON，字段集合冻结（必须含 ecuList 逐 ECU 明细）。
-//     该版本不提供独立软件件号 => software_part_number 保持缺失，不得用
-//     partNumber 补齐。
+//     本项目决策（CCU-FOTA 侧放宽）：v1 若携带增量字段 softwarePartNumber 则照常
+//     解码，不再因版本为 v1 而丢弃该事实；字段缺失/为空仍视为未提供，绝不
+//     用 partNumber 补齐。
 //   * schemaVersion=2：目标契约，逐 ECU 独立表达 partNumber、softwarePartNumber、
-//     swVersion、hwVersion 与 serialNumber。
+//     swVersion、hwVersion 与 serialNumber（解码语义与 v1 一致）。
 //   * 未知/缺失 schemaVersion、缺字段、非法枚举 -> fail-closed（不猜测、不降级）。
 //   * 字段名同时接受冻结的 camelCase 与同义 snake_case 别名：两侧字段集合完全
 //     一致，不存在第二套语义，仅降低 FOTA/DIAG 发布顺序风险。
@@ -43,8 +44,8 @@ struct DiagInventoryDecodeResult {
 class DiagInventoryCodec {
 public:
     // 支持识别并可解码的编码版本（CCU-FOTA-DSN-CR-014 D1）。
-    // v1 可解码但不可上报（无软件件号，由采集端口统一 fail-closed）；
-    // v2 为目标契约。未知版本仍返回 kDiagPayloadInvalid。
+    // v1/v2 均可解码；是否可上报只取决于必需事实是否齐备（由采集端口
+    // 统一 fail-closed）。未知版本仍返回 kDiagPayloadInvalid。
     static constexpr const char* kSchemaVersionV1 = "1";
     static constexpr const char* kSchemaVersionV2 = "2";
 

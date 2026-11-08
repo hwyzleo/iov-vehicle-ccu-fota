@@ -54,9 +54,12 @@ fs::path makeUniqueRoot() {
 }
 
 // DIAG 侧清单响应（可变更内容，模拟登记后版本变化 / seed->hardware）。
-// CR-014：payloadVersion 可切回 v1 以验证混合版本 fail-closed 配对行为。
+// CR-014：payloadVersion 可切回 v1 以验证混合版本配对行为。
+// v1WithSoftwarePn 模拟“v1 + 增量 softwarePartNumber”（当前 CCU-DIAG 的实际
+// 形态，FOTA 侧已不再按版本丢弃该事实）；为 false 时表示 v1 旧形态（无件号）。
 struct DiagInventoryResponse {
-    int payloadVersion = 2;  // 2 = 目标契约（独立软件件号）；1 = 旧 DIAG
+    int payloadVersion = 2;  // 2 = 目标契约；1 = schemaVersion=1
+    bool v1WithSoftwarePn = false;
     std::string source = "seed";
     std::string baseline = "BASE-DIAG-1";
     std::string bmsVersion = "1.0.0";
@@ -79,11 +82,13 @@ struct DiagInventoryResponse {
             })";
         }
         // v2：逐 ECU 独立表达总成件号、软件件号、序列号与硬件版本；
-        // v1：字段集冻结，不含 softwarePartNumber（旧 DIAG）。
+        // v1：标准字段集不含 softwarePartNumber，仅当 v1WithSoftwarePn 时携带
+        // 增量件号（模拟当前 CCU-DIAG 发布物）。
+        const bool withSoftwarePn = payloadVersion == 2 || v1WithSoftwarePn;
         const std::string swPnBms =
-            payloadVersion == 2 ? "\"softwarePartNumber\":\"" + bmsSoftwarePn + "\"," : "";
+            withSoftwarePn ? "\"softwarePartNumber\":\"" + bmsSoftwarePn + "\"," : "";
         const std::string swPnVcu =
-            payloadVersion == 2 ? "\"softwarePartNumber\":\"" + vcuSoftwarePn + "\"," : "";
+            withSoftwarePn ? "\"softwarePartNumber\":\"" + vcuSoftwarePn + "\"," : "";
         const std::string snBms =
             payloadVersion == 2 ? R"("serialNumber":"SN-BMS",)" : "";
         const std::string snVcu =
@@ -297,10 +302,10 @@ TEST_F(DiagInventoryEndToEndTest, DiagContentChangeAddsExactlyOneRevision) {
 }
 
 // ---------------------------------------------------------------------------
-// 混合版本配对：旧 DIAG payload v1（无软件件号）+ 新 FOTA
-// => 不产生任何上报、不分配 revision（不得静默上报错误字段）。
+// 旧 DIAG payload v1 且不带软件件号 => 不产生任何上报、不分配 revision（不得
+// 静默上报错误字段，不得用 partNumber 补齐）。
 // ---------------------------------------------------------------------------
-TEST_F(DiagInventoryEndToEndTest, LegacyDiagPayloadV1IsNeverReported) {
+TEST_F(DiagInventoryEndToEndTest, LegacyDiagPayloadV1WithoutSoftwarePnIsNeverReported) {
     diagResp_->payloadVersion = 1;
     auto o = orch_->step();
     EXPECT_FALSE(o.error.empty());
@@ -309,6 +314,32 @@ TEST_F(DiagInventoryEndToEndTest, LegacyDiagPayloadV1IsNeverReported) {
     EXPECT_FALSE(cloudStore_->loadInventory().has_value());
     auto seq = fotaStore_->loadSequence();
     EXPECT_FALSE(seq.has_value() && seq->highestAllocated != 0u);
+}
+
+// ---------------------------------------------------------------------------
+// payload v1 + 增量 softwarePartNumber（当前 CCU-DIAG 形态）：必需事实齐备，
+// 正常上报 1 个 FULL 版本，且 softwarePartNumber 逐 ECU 一致。
+// ---------------------------------------------------------------------------
+TEST_F(DiagInventoryEndToEndTest, V1PayloadWithSoftwarePartNumberIsReported) {
+    diagResp_->payloadVersion = 1;
+    diagResp_->v1WithSoftwarePn = true;
+    auto o = orch_->step();
+    EXPECT_TRUE(o.error.empty()) << o.error;
+
+    EXPECT_EQ(transport_->inventoryVersionCount(), 1u);
+    EXPECT_EQ(transport_->inventoryFullCount(), 1u);
+
+    auto last = transport_->lastTaskCheck();
+    ASSERT_EQ(last.ecu_list_size(), 2);
+    EXPECT_EQ(last.ecu_list(0).ecu_id(), "BMS");
+    EXPECT_EQ(last.ecu_list(0).hardware_part_number(), "PN-BMS");
+    EXPECT_EQ(last.ecu_list(0).software_part_number(), "SW-PN-BMS");
+    EXPECT_EQ(last.ecu_list(1).ecu_id(), "VCU");
+    EXPECT_EQ(last.ecu_list(1).software_part_number(), "SW-PN-VCU");
+
+    auto rec = cloudStore_->loadInventory();
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_EQ(rec->status, "ACCEPTED");
 }
 
 // ---------------------------------------------------------------------------

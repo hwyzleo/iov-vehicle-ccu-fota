@@ -169,10 +169,12 @@ bool parseEcuStatus(std::string_view raw, EcuStatus& out) {
 }
 
 // 解码单个 ECU 条目；失败细节定位到 ecuList[<index>].<field>（不含值）。
-// payloadV2 为 true 时才解码独立 softwarePartNumber（CR-014 D1）：v1 冻结字段集
-// 不含该字段，因此即使对端意外提供也不读取，保证不产生跨版本兜底语义。
-bool decodeEcuEntry(const json& item, std::size_t index, bool payloadV2,
-                    EcuVersionEntry& entry, std::string& err) {
+// 独立 softwarePartNumber 在 v1 与 v2 中都解码（CR-014 D1 的版本门禁已按项目
+// 决策取消：CCU-DIAG 当前以 schemaVersion=1 + 增量字段 softwarePartNumber 的形态
+// 提供该事实，不得因此整份清单不可上报）。语义仍然 fail-closed：字段缺失/为空
+// 即视为未提供，绝不用 partNumber 补齐（补齐由采集端口前置校验拒绝）。
+bool decodeEcuEntry(const json& item, std::size_t index, EcuVersionEntry& entry,
+                    std::string& err) {
     const std::string prefix = "ecuList[" + std::to_string(index) + "].";
     if (!item.is_object()) {
         err = prefix + "not an object";
@@ -191,8 +193,7 @@ bool decodeEcuEntry(const json& item, std::size_t index, bool payloadV2,
                            entry.part_number, (prefix + "partNumber").c_str(), err)) {
         return false;
     }
-    if (payloadV2 &&
-        !getOptionalString(item, {"softwarePartNumber", "software_part_number"},
+    if (!getOptionalString(item, {"softwarePartNumber", "software_part_number"},
                            entry.software_part_number,
                            (prefix + "softwarePartNumber").c_str(), err)) {
         return false;
@@ -290,8 +291,6 @@ DiagInventoryDecodeResult DiagInventoryCodec::decode(std::string_view payload) {
         return invalid(ota::inventory_error::kDiagPayloadInvalid,
                        "unsupported schemaVersion: " + schemaVersion);
     }
-    const bool payloadV2 = schemaVersion == kSchemaVersionV2;
-
     DiagInventoryDecodeResult out;
     out.snapshot.schema_version = schemaVersion;
 
@@ -383,7 +382,7 @@ DiagInventoryDecodeResult DiagInventoryCodec::decode(std::string_view payload) {
     std::size_t index = 0;
     for (const auto& item : *ecuList) {
         EcuVersionEntry entry;
-        if (!decodeEcuEntry(item, index, payloadV2, entry, err)) {
+        if (!decodeEcuEntry(item, index, entry, err)) {
             return invalid(ota::inventory_error::kDiagPayloadInvalid, err);
         }
         // 重复 ecuId 无法稳定表达逐 ECU 事实 -> fail-closed。
