@@ -27,6 +27,28 @@ someip_fw::Payload vinPayload() {
     return someip_fw::Payload(vin.begin(), vin.end());
 }
 
+// CCU-FOTA-DSN-CR-013：DIAG 清单接口 payload v1（含 ecuList 逐 ECU 明细）。
+someip_fw::Payload inventoryPayloadV1() {
+    const std::string json = R"({
+      "schemaVersion": 1,
+      "inventorySource": "seed",
+      "vin": "12345678901234567",
+      "vinSource": "PROVISIONED",
+      "baselineId": "BASE-DIAG-1",
+      "baselineSource": "FACTORY",
+      "registryVersion": "2026.07.1",
+      "collectedAt": "2026-11-08T10:00:00Z",
+      "overallResult": "ALL_OK",
+      "ecuList": [
+        {"ecuId":"BMS","partNumber":"PN-BMS","swVersion":"1.0.0","hwVersion":"HW-BMS",
+         "source":"UDS_0x22","status":"OK","errorCode":""},
+        {"ecuId":"VCU","partNumber":"PN-VCU","swVersion":"2.0.0","hwVersion":"HW-VCU",
+         "source":"SOMEIP_GET_VERSION","status":"OK"}
+      ]
+    })";
+    return someip_fw::Payload(json.begin(), json.end());
+}
+
 } // namespace
 
 // ============================================================
@@ -49,9 +71,14 @@ protected:
             [](const someip_fw::RequestContext&, someip_fw::PayloadView) {
                 return someip_fw::MethodResult::ok(vinPayload());
             });
+        provider_.registerMethod(METHOD_COLLECT_VEHICLE_INVENTORY,
+            [](const someip_fw::RequestContext&, someip_fw::PayloadView) {
+                return someip_fw::MethodResult::ok(inventoryPayloadV1());
+            });
         provider_.offer();
 
-        someip_fw::Client client = rt_.createClient(key, {1, 0});
+        auto client = std::make_shared<someip_fw::Client>(
+            rt_.createClient(key, {1, 0}));
         diag_ = std::make_shared<someip::DiagInventoryClient>(
             std::move(client), std::chrono::milliseconds(2000));
         diag_->requestService();
@@ -78,8 +105,20 @@ TEST_F(DiagClientTest, GetVinReturnsSeventeenChars) {
 TEST_F(DiagClientTest, CollectVehicleInventorySucceeds) {
     VehicleSoftwareSnapshot snap;
     ASSERT_TRUE(diag_->collectVehicleInventory(snap));
+    // 清单内容完全来自 DIAG payload，FOTA 侧不得补全/硬编码任何常量。
+    EXPECT_EQ(snap.schema_version, "1");
     EXPECT_EQ(snap.vin, "12345678901234567");
-    EXPECT_FALSE(snap.ecu_list.empty());
+    EXPECT_EQ(snap.registry_version, "2026.07.1");
+    EXPECT_EQ(snap.baseline_id.value_or(""), "BASE-DIAG-1");
+    EXPECT_EQ(snap.inventory_source, InventorySource::SEED);
+    EXPECT_EQ(snap.overall_result, CollectionStatus::ALL_OK);
+    ASSERT_EQ(snap.ecu_list.size(), 2u);
+    EXPECT_EQ(snap.ecu_list[0].ecu_id, "BMS");
+    EXPECT_EQ(snap.ecu_list[0].source, VersionSource::UDS_0x22);
+    EXPECT_EQ(snap.ecu_list[1].ecu_id, "VCU");
+    EXPECT_EQ(snap.ecu_list[1].source, VersionSource::SOMEIP_GET_VERSION);
+    // 采集阶段不分配序号（CR-012 D2）。
+    EXPECT_EQ(snap.snapshot_seq, 0u);
 }
 
 // ============================================================
@@ -98,7 +137,7 @@ TEST(ClientsVersionTest, VersionMismatchPreventsCall) {
     provider.offer();
 
     // Client 请求 major=2 -> VersionMismatch
-    someip_fw::Client client = rt.createClient(key, {2, 0});
+    auto client = std::make_shared<someip_fw::Client>(rt.createClient(key, {2, 0}));
     auto diag = someip::DiagInventoryClient(std::move(client),
                                             std::chrono::milliseconds(500));
     diag.requestService();

@@ -26,6 +26,7 @@
 #include "ccu/fota/ota/ports/clock_sync_provider.hpp"
 #include "ccu/fota/ota/ports/consent_provider.hpp"
 #include "ccu/fota/ota/ports/install_executor.hpp"
+#include "ccu/fota/ota/ports/installed_version_registrar.hpp"
 #include "ccu/fota/ota/ports/inventory_provider.hpp"
 #include "ccu/fota/ota/ports/log_collector.hpp"
 #include "ccu/fota/ota/ports/package_downloader.hpp"
@@ -99,13 +100,16 @@ public:
     // revisionAllocator 为 durable 序号分配器（生产注入
     // FotaStateStore::allocateSnapshotSeq）。仅当本轮需要新清单版本时调用，
     // 传空表示无 durable 分配能力（缺少分配器时身份决策 fail-closed）。
+    // registrar 为安装结果登记端口（CCU-FOTA-DSN-CR-013，可为空 = 能力不可用）。
+    // 不可用时：禁止开始新的安装；已成功的执行保持 RESULT_PENDING，不得跳过收口。
     FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv,
                      ConsentProvider& consent, PackageDownloader& dl,
                      VehicleConditionProvider& cond, InstallExecutor& exec,
                      LogCollector& log, store::fota::FotaCloudStateStore& store,
                      FotaOrchestratorConfig cfg,
                      ClockSyncProvider* clockSync = nullptr,
-                     RevisionAllocator revisionAllocator = nullptr);
+                     RevisionAllocator revisionAllocator = nullptr,
+                     InstalledVersionRegistrar* registrar = nullptr);
 
     // 启动对账恢复：从 durable 状态恢复 VehicleTask/Execution/outbox 水位。
     void reconcileOnStart();
@@ -140,6 +144,8 @@ private:
     store::fota::FotaCloudStateStore& store_;
     FotaOrchestratorConfig cfg_;
     ClockSyncProvider* clockSync_ = nullptr;  // 可为空 = 不启用时钟门禁
+    // 安装结果登记端口（可为空 = 能力不可用，CR-013 D7）。
+    InstalledVersionRegistrar* registrar_ = nullptr;
     std::unique_ptr<InventoryIdentityPlanner> planner_;  // 清单身份唯一决策入口
 
     VehicleTaskState vtState_ = VehicleTaskState::None;
@@ -153,6 +159,9 @@ private:
     ::vehicle::fota::v1::InstallPermitResponse permit_;
     std::string executionId_;
     std::uint32_t attemptNo_ = 0;
+    // 已登记标识（fota.execution.installedVersionRegistrationId）。非空 => 该
+    // Execution 已登记，重启重放时跳过登记（CR-013 §失败、重试与恢复）。
+    std::string installedVersionRegistrationId_;
     std::uint64_t lastReceivedControlRev_ = 0;
     std::uint64_t lastAppliedControlRev_ = 0;
     std::vector<std::string> pendingControlIds_;
@@ -162,6 +171,15 @@ private:
 
     // 时钟门禁：未就绪时填充 outcome（action=awaitClockSync）并返回 false。
     bool clockReady(StepOutcome& outcome);
+
+    // CCU-FOTA-DSN-CR-013：登记能力检查（安装前置）。不可用时告警并返回 false，
+    // 调用方不得推进新安装。
+    bool registrationCapable(StepOutcome& outcome, const char* stage);
+    // 构造本次 Execution 的登记请求（items 来自冻结任务包清单）。
+    InstalledVersionsReport buildInstalledVersionsReport() const;
+    // 安装结果登记（幂等）。返回 true 表示可以收口 Execution；false 表示保持
+    // RESULT_PENDING（已 durable 保存）并等待下次重试。
+    bool registerInstalledVersions(StepOutcome& outcome);
 
     // 阶段动作
     StepOutcome doCheckTask();

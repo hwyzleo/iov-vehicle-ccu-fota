@@ -12,6 +12,7 @@
 //   fota.consent                   - 条款身份、receipt、有效期、权威状态
 //   fota.downloads:<package_id>    - 各包 packageRevision/ETag/offset/凭证/校验/stageResult
 //   fota.execution                 - execution/attempt/permit/control/冻结策略/checkpoint
+//                                    + 已安装版本登记标识（CR-013 v2）
 //   fota.event_outbox_meta         - 事件水位（next/accepted sequence）
 //   fota.event_outbox:<seq>        - 单条事件 ID/摘要/payload/发送状态
 //   fota.controls:<revision>       - 单条控制指令/回执序号/状态/原因
@@ -65,7 +66,9 @@ constexpr std::uint32_t VEHICLE_TASK_VERSION = 1;
 constexpr std::uint32_t INVENTORY_VERSION    = 2;
 constexpr std::uint32_t CONSENT_VERSION      = 1;
 constexpr std::uint32_t DOWNLOADS_VERSION    = 1;
-constexpr std::uint32_t EXECUTION_VERSION    = 1;
+// CR-013: v2 引入安装结果登记标识（installedVersionRegistrationId）。
+// v1 记录可直接升级读取（字段为空 => 进程重启后重新登记，DIAG 侧幂等）。
+constexpr std::uint32_t EXECUTION_VERSION    = 2;
 constexpr std::uint32_t EVENT_OUTBOX_META_VERSION = 1;
 constexpr std::uint32_t EVENT_OUTBOX_VERSION = 1;
 constexpr std::uint32_t CONTROLS_VERSION     = 1;
@@ -174,6 +177,9 @@ struct FotaExecutionRecord {
     std::string   checkpointPbHex;         // InstallCheckpoint proto binary hex
     std::string   offlinePolicyPbHex;      // OfflinePolicy proto binary hex
     std::string   timeoutPolicyPbHex;      // TimeoutPolicy proto binary hex
+    // CCU-FOTA-DSN-CR-013：DIAG 已接受的安装结果登记标识。非空 => 该 Execution
+    // 已登记，重启重放时必须跳过登记（DIAG 侧幂等，不得重复变更清单）。
+    std::string   installedVersionRegistrationId;
 };
 
 // ============================================================

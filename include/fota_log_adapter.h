@@ -17,6 +17,15 @@ constexpr const char* INVENTORY_REQUEST_MERGED   = "fota.inventory.request.merge
 // DIAG collect
 constexpr const char* DIAG_COLLECT_SUCCEEDED     = "fota.diag.collect.succeeded";
 constexpr const char* DIAG_COLLECT_FAILED        = "fota.diag.collect.failed";
+// DIAG 清单解码 / 安装结果登记 (CCU-FOTA-DSN-CR-013)
+// 清单只记 count/digest/来源；登记只记 executionId/attemptNo/appliedCount。
+constexpr const char* DIAG_INVENTORY_DECODED     = "fota.diag.inventory.decoded";
+constexpr const char* DIAG_INVENTORY_DECODE_FAILED = "fota.diag.inventory.decode_failed";
+constexpr const char* DIAG_REGISTRATION_REQUESTED  = "fota.diag.registration.requested";
+constexpr const char* DIAG_REGISTRATION_ACCEPTED   = "fota.diag.registration.accepted";
+constexpr const char* DIAG_REGISTRATION_REJECTED   = "fota.diag.registration.rejected";
+constexpr const char* DIAG_REGISTRATION_DUPLICATE  = "fota.diag.registration.duplicate";
+constexpr const char* DIAG_REGISTRATION_UNAVAILABLE = "fota.diag.registration.unavailable";
 // Snapshot assemble
 constexpr const char* SNAPSHOT_ASSEMBLED         = "fota.snapshot.assembled";
 constexpr const char* SNAPSHOT_ASSEMBLE_FAILED   = "fota.snapshot.assemble.failed";

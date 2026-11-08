@@ -117,7 +117,8 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
 
     // ---- diag.* ----
     rejectUnknown(s, "fota.diag",
-                  {"collect_timeout_ms", "retry_max_attempts", "retry_backoff_ms"});
+                  {"collect_timeout_ms", "retry_max_attempts", "retry_backoff_ms",
+                   "registration"});
 
     std::int64_t diagTimeout =
         s.getOr<std::int64_t>("fota.diag.collect_timeout_ms", 30000);
@@ -134,6 +135,33 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
         s.getOr<std::int64_t>("fota.diag.retry_backoff_ms", 1000);
     requireRange("fota.diag.retry_backoff_ms", diagBackoff, 0, INT64_MAX);
     c.diagRetry.backoff = std::chrono::milliseconds(diagBackoff);
+
+    // ---- fota.diag.registration.*（CCU-FOTA-DSN-CR-013）----
+    // 登记能力（Method ID 由 Registry 分配，0 = 未分配 -> 能力关闭）。
+    rejectUnknown(s, "fota.diag.registration",
+                  {"enabled", "method_id", "interface_major", "timeout_ms"});
+    c.diagRegistration.enabled =
+        s.getOr<bool>("fota.diag.registration.enabled", true);
+    {
+        std::int64_t v =
+            s.getOr<std::int64_t>("fota.diag.registration.method_id", 0);
+        // 0 = Registry 尚未分配（合法，能力关闭）；0x0001..0x7FFF 为可分配区。
+        requireRange("fota.diag.registration.method_id", v, 0, 0x7FFF);
+        c.diagRegistration.methodId = static_cast<std::uint16_t>(v);
+
+        v = s.getOr<std::int64_t>("fota.diag.registration.interface_major", 1);
+        requireRange("fota.diag.registration.interface_major", v, 1, 255);
+        if (v != 1) {
+            // 与 DIAG 接口 major 不一致 -> fail-closed（不得以不兼容版本调用）
+            throw FotaConfigException(
+                "fota.diag.registration.interface_major mismatch: expected 1");
+        }
+        c.diagRegistration.interfaceMajor = static_cast<std::uint8_t>(v);
+
+        v = s.getOr<std::int64_t>("fota.diag.registration.timeout_ms", 30000);
+        requireRange("fota.diag.registration.timeout_ms", v, 1, 600000);
+        c.diagRegistration.timeout = std::chrono::milliseconds(v);
+    }
 
     // ---- tbox.* 已移除：InventoryReporter/TboxInventoryClient 为死代码，
     // fota.tbox.submit_timeout_ms / retry_* 不再解析（见收尾清理）。 ----

@@ -100,6 +100,35 @@ properties:
             type: integer
             minimum: 0
             default: 1000
+          registration:
+            # CCU-FOTA-DSN-CR-013：安装结果登记能力与 Registry 寻址。
+            # Method ID 由 VEH-SOMEIP Registry 分配（0 = 未分配 -> 能力关闭，
+            # 不猜 ID、不回退文件），接口版本不一致 fail-closed。
+            type: object
+            additionalProperties: false
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                description: 登记能力开关；false 只表示能力不可用（阻止新安装），不得作为跳过登记的开关。
+              method_id:
+                type: integer
+                minimum: 0
+                maximum: 32767
+                default: 0
+                description: Registry 分配的 METHOD_RECORD_INSTALLED_VERSIONS（0 = 未分配）。
+              interface_major:
+                type: integer
+                minimum: 1
+                maximum: 255
+                default: 1
+                description: CCU-DIAG 接口 major 版本（必须为 1）。
+              timeout_ms:
+                type: integer
+                minimum: 1
+                maximum: 600000
+                default: 30000
+                description: 单次登记调用超时（毫秒）。
       someip:
         # CCU-FOTA-DSN-CR-007/010/011 SOME/IP 框架接入（契约 B 有界传输与 Registry 寻址）
         type: object

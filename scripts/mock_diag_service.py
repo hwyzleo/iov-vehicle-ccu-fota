@@ -4,6 +4,7 @@ Mock DIAG Service for testing CCU-FOTA.
 Listens on port 30501 and responds to SOME/IP requests with mock data.
 """
 
+import json
 import socket
 import struct
 import sys
@@ -31,10 +32,25 @@ METHOD_READ_VIN = 0x0001
 METHOD_COLLECT_VEHICLE_INVENTORY = 0x0002
 METHOD_GET_ECU_VERSION = 0x0003
 METHOD_GET_REGISTRY_VERSION = 0x0004
+# CCU-DIAG-DSN-CR-010 / CCU-FOTA-DSN-CR-013：安装结果登记（建议 ID，待 Registry 定案）
+METHOD_RECORD_INSTALLED_VERSIONS = 0x0005
 
 # Mock data
 MOCK_VIN = "12345678901234567"
 MOCK_REGISTRY_VERSION = "1.0.0"
+
+# 开发夹具清单（准权威在 CCU-DIAG: EcuInventoryStore + seed；本文件仅本地联调）。
+# FOTA 侧不持有任何清单常量，全部内容来自本响应。
+MOCK_INVENTORY_ECUS = [
+    {"ecuId": "BMS", "partNumber": "PN-BMS-DEV", "swVersion": "1.0.0",
+     "hwVersion": "HW-BMS-DEV", "source": "UDS_0x22", "status": "OK", "errorCode": ""},
+    {"ecuId": "VCU", "partNumber": "PN-VCU-DEV", "swVersion": "1.0.0",
+     "hwVersion": "HW-VCU-DEV", "source": "SOMEIP_GET_VERSION", "status": "OK", "errorCode": ""},
+]
+
+# 登记幂等环（executionId:attemptNo -> registrationId），模拟 DIAG 侧去重。
+APPLIED_REGISTRATIONS = {}
+_REGISTRATION_SEQ = 0
 
 def build_someip_response(service_id, method_id, client_id, session_id, payload, return_code=0x00):
     """Build a SOME/IP response message."""
@@ -106,10 +122,64 @@ def handle_request(data, client_address):
             return build_someip_response(service_id, method_id, client_id, session_id, b'', return_code=0x01)
     
     elif method_id == METHOD_COLLECT_VEHICLE_INVENTORY:
-        print(f"[HANDLER] COLLECT_VEHICLE_INVENTORY request")
-        # This method would return the full inventory, but for simplicity we'll return success
-        # The actual implementation would call getVin and getEcuVersion internally
-        return build_someip_response(service_id, method_id, client_id, session_id, b'')
+        print(f"[HANDLER] COLLECT_VEHICLE_INVENTORY request", flush=True)
+        # payload v1（CCU-DIAG-DSN-CR-010 冻结）：必须含 ecuList 逐 ECU 明细；
+        # 失败时返回非 0 return code（不得“成功 + 空清单”）。
+        response = {
+            "schemaVersion": 1,
+            "inventorySource": "seed",
+            "vin": MOCK_VIN,
+            "vinSource": "PROVISIONED",
+            "baselineId": "BASE-DEV-001",
+            "baselineSource": "FACTORY",
+            "registryVersion": MOCK_REGISTRY_VERSION,
+            "collectedAt": "2026-11-08T10:00:00Z",
+            "overallResult": "ALL_OK",
+            "ecuList": MOCK_INVENTORY_ECUS,
+        }
+        body = json.dumps(response).encode('utf-8')
+        return build_someip_response(service_id, method_id, client_id, session_id, body)
+
+    elif method_id == METHOD_RECORD_INSTALLED_VERSIONS:
+        print(f"[HANDLER] RECORD_INSTALLED_VERSIONS request", flush=True)
+        try:
+            req = json.loads(payload.decode('utf-8')) if payload else {}
+        except json.JSONDecodeError:
+            body = json.dumps({"schemaVersion": 1,
+                               "disposition": "REJECTED_INVALID",
+                               "rejectedItems": [{"reasonCode": "INVALID_JSON"}]})
+            return build_someip_response(service_id, method_id, client_id, session_id,
+                                        body.encode('utf-8'))
+
+        key = f"{req.get('executionId', '')}:{req.get('attemptNo', 0)}"
+        if key in APPLIED_REGISTRATIONS:
+            body = json.dumps({"schemaVersion": 1, "disposition": "DUPLICATE",
+                               "registrationId": APPLIED_REGISTRATIONS[key],
+                               "appliedCount": 0, "rejectedItems": []})
+            return build_someip_response(service_id, method_id, client_id, session_id,
+                                        body.encode('utf-8'))
+
+        items = req.get("items", [])
+        if not items:
+            body = json.dumps({"schemaVersion": 1, "disposition": "REJECTED_INVALID",
+                               "rejectedItems": [{"reasonCode": "MISSING_FIELD"}]})
+            return build_someip_response(service_id, method_id, client_id, session_id,
+                                        body.encode('utf-8'))
+
+        # 幂等应用：更新开发夹具清单中的软件版本事实（不触碰下挂 ECU）。
+        applied = {}
+        for it in items:
+            applied[it.get("ecuId")] = it.get("installedVersion")
+        for ecu in MOCK_INVENTORY_ECUS:
+            if ecu["ecuId"] in applied and applied[ecu["ecuId"]]:
+                ecu["swVersion"] = applied[ecu["ecuId"]]
+        APPLIED_REGISTRATIONS[key] = f"REG-{len(APPLIED_REGISTRATIONS) + 1}"
+        body = json.dumps({"schemaVersion": 1, "disposition": "APPLIED",
+                           "registrationId": APPLIED_REGISTRATIONS[key],
+                           "appliedCount": len(items), "rejectedItems": [],
+                           "effectiveUpdatedAt": "2026-11-08T10:05:00Z"})
+        return build_someip_response(service_id, method_id, client_id, session_id,
+                                    body.encode('utf-8'))
     
     else:
         print(f"[HANDLER] Unknown method: 0x{method_id:04x}")

@@ -54,6 +54,8 @@ set(FOTA_SOURCES
     src/store/fota_state_migration.cpp
     src/snapshot_assembler.cpp
     src/someip/diag_inventory_client.cpp
+    src/someip/diag_inventory_codec.cpp
+    src/someip/diag_installed_version_registrar.cpp
     src/someip/error_mapper.cpp
     src/someip/tbox_generic_transport_contract.cpp
     src/fota_log_adapter.cpp
@@ -125,6 +127,8 @@ if(FOTA_BUILD_TESTS)
         tests/someip/error_mapper_test.cpp
         tests/someip/registry_contract_test.cpp
         tests/someip/clients_test.cpp
+        tests/someip/diag_inventory_codec_test.cpp
+        tests/someip/diag_installed_version_registrar_test.cpp
         tests/someip/tbox_generic_transport_contract_test.cpp
         tests/ota/state_machine_test.cpp
         tests/ota/fota_cloud_state_store_test.cpp
@@ -136,6 +140,8 @@ if(FOTA_BUILD_TESTS)
         tests/ota/inventory_identity_planner_test.cpp
         tests/ota/inventory_revision_test.cpp
         tests/ota/inventory_provider_test.cpp
+        tests/ota/installed_version_registration_test.cpp
+        tests/ota/diag_inventory_end_to_end_test.cpp
         # Mock scenario 仅测试 target 编译（NON_PRODUCTION，CR-009 §构建与运行隔离）
         src/ota/mock/scenario_script.cpp
     )

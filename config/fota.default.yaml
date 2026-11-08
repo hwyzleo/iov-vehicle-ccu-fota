@@ -22,6 +22,13 @@ fota:
     collect_timeout_ms: 30000         # DIAG 采集超时，正整数
     retry_max_attempts: 2             # 采集重试次数 0..10
     retry_backoff_ms: 1000            # 采集重试退避，非负
+    registration:                     # 安装结果登记（CCU-FOTA-DSN-CR-013）
+      enabled: true                   # 能力开关；false 只阻止新安装，不是跳过登记的开关
+      method_id: 0                    # Registry 分配的 METHOD_RECORD_INSTALLED_VERSIONS；
+                                      # 0 = 尚未分配 -> 能力关闭（不得猜测 ID，
+                                      # 未分配时不启用真实安装，读清单/上报不受影响）
+      interface_major: 1              # CCU-DIAG 接口 major（不一致 fail-closed）
+      timeout_ms: 30000               # 单次登记调用超时
   someip:                            # CCU-FOTA-DSN-CR-007 SOME/IP 框架接入（CR-010/011 契约 B）
     transport:                       # 契约 B SOME/IP 通用传输有界配置 (CR-010/011)
       exchange_timeout_ms: 10000      # 单次 exchange/publish 本地超时上限

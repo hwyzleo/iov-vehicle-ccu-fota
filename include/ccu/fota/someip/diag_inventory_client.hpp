@@ -33,8 +33,10 @@ namespace someip {
 // （沿用现有可 mock 模式）；生产实现经 framework Client 调用。
 class DiagInventoryClient {
 public:
-    // 生产构造：包装 framework Client，注入采集超时（fota.diag.collect_timeout_ms）。
-    DiagInventoryClient(ccu::fw::someip::Client client,
+    // 生产构造：包装共享 framework Client（同一 DIAG Service 的多个适配器共享
+    // 一个 Client/一次 requestService；framework 不允许同一服务重复 request）。
+    // collectTimeout = fota.diag.collect_timeout_ms。
+    DiagInventoryClient(std::shared_ptr<ccu::fw::someip::Client> client,
                         std::chrono::milliseconds collectTimeout);
     virtual ~DiagInventoryClient();
 
@@ -58,7 +60,7 @@ protected:
     DiagInventoryClient();
 
 private:
-    ccu::fw::someip::Client client_;
+    std::shared_ptr<ccu::fw::someip::Client> client_;
     std::chrono::milliseconds collectTimeout_;
     bool hasClient_;
 };

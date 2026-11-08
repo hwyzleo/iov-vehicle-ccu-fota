@@ -35,7 +35,8 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
                        std::shared_ptr<LogCollector> log,
                        std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
                        std::shared_ptr<ClockSyncProvider> clockSync,
-                       RevisionAllocator revisionAllocator)
+                       RevisionAllocator revisionAllocator,
+                       std::shared_ptr<InstalledVersionRegistrar> registrar)
     : runtime_(runtime)
     , transportCfg_(std::move(transportCfg))
     , orchCfg_(std::move(orchCfg))
@@ -47,7 +48,8 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
     , exec_(std::move(exec))
     , log_(std::move(log))
     , cloudStore_(std::move(cloudStore))
-    , clockSync_(std::move(clockSync)) {
+    , clockSync_(std::move(clockSync))
+    , registrar_(std::move(registrar)) {
     if (!inv_ || !consent_ || !dl_ || !cond_ || !exec_ || !log_ || !cloudStore_) {
         throw std::invalid_argument("FotaDaemon: ports/store must be non-null");
     }
@@ -74,7 +76,7 @@ FotaDaemon::FotaDaemon(ccu::fw::someip::SomeIpRuntime& runtime,
     cloud_ = std::make_unique<FotaCloudProxyViaTransport>(*transport_);
     orch_ = std::make_unique<FotaOrchestrator>(
         *cloud_, *inv_, *consent_, *dl_, *cond_, *exec_, *log_, *cloudStore_, orchCfg_,
-        clockSync_.get(), std::move(revisionAllocator));
+        clockSync_.get(), std::move(revisionAllocator), registrar_.get());
 }
 
 FotaDaemon::~FotaDaemon() { stop(); }
@@ -93,12 +95,13 @@ std::unique_ptr<FotaDaemon> FotaDaemon::create(
     std::shared_ptr<LogCollector> log,
     std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
     std::shared_ptr<ClockSyncProvider> clockSync,
-    RevisionAllocator revisionAllocator) {
+    RevisionAllocator revisionAllocator,
+    std::shared_ptr<InstalledVersionRegistrar> registrar) {
     return std::unique_ptr<FotaDaemon>(new FotaDaemon(
         runtime, address, std::move(transportCfg), std::move(orchCfg),
         businessTrigger, std::move(inv), std::move(consent), std::move(dl),
         std::move(cond), std::move(exec), std::move(log), std::move(cloudStore),
-        std::move(clockSync), std::move(revisionAllocator)));
+        std::move(clockSync), std::move(revisionAllocator), std::move(registrar)));
 }
 
 void FotaDaemon::start() {

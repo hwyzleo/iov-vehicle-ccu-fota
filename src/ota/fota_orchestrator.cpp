@@ -4,6 +4,7 @@
 // =============================================================================
 
 #include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/ota/inventory_error_codes.hpp"
 #include "ccu/fota/ota/state/state_proto.hpp"
 #include "ccu/fota/store/fota_cloud_state_serializer.hpp"
 
@@ -31,10 +32,11 @@ FotaOrchestrator::FotaOrchestrator(FotaCloudProxy& cloud, InventoryProvider& inv
                                    LogCollector& log, store::fota::FotaCloudStateStore& store,
                                    FotaOrchestratorConfig cfg,
                                    ClockSyncProvider* clockSync,
-                                   RevisionAllocator revisionAllocator)
+                                   RevisionAllocator revisionAllocator,
+                                   InstalledVersionRegistrar* registrar)
     : cloud_(cloud), inv_(inv), consent_(consent), dl_(dl), cond_(cond),
       exec_(exec), log_(log), store_(store), cfg_(std::move(cfg)),
-      clockSync_(clockSync) {
+      clockSync_(clockSync), registrar_(registrar) {
     // CR-012：清单身份决策器（唯一分配 revision 与决定 FULL/DIGEST 的入口）。
     InventoryIdentityConfig icfg;
     icfg.retryBackoff = cfg_.inventoryIdentityRetryBackoff;
@@ -97,6 +99,7 @@ void FotaOrchestrator::persistExecution() {
         permit_.timeout_policy().SerializeToString(&polBin);
         r.timeoutPolicyPbHex = protoBinaryToHex(polBin);
     }
+    r.installedVersionRegistrationId = installedVersionRegistrationId_;
     store_.saveExecution(r);
 
     // 事件水位（outbox meta）
@@ -127,6 +130,7 @@ void FotaOrchestrator::loadFromStore() {
         executionStateFromString(ex->executionState.c_str(), exState_);
         executionId_ = ex->executionId;
         attemptNo_ = ex->attemptNo;
+        installedVersionRegistrationId_ = ex->installedVersionRegistrationId;
         permit_.set_execution_id(ex->executionId);
         permit_.set_attempt_no(ex->attemptNo);
         permit_.set_permit_id(ex->permitId);
@@ -171,6 +175,7 @@ void FotaOrchestrator::resetTerminalToDetection() {
     permit_.Clear();
     executionId_.clear();
     attemptNo_ = 0;
+    installedVersionRegistrationId_.clear();
     lastReceivedControlRev_ = 0;
     lastAppliedControlRev_ = 0;
     pendingControlIds_.clear();
@@ -230,6 +235,158 @@ bool FotaOrchestrator::clockReady(StepOutcome& outcome) {
     outcome.awaitingClockSync = true;
     outcome.error = std::string("system clock not synchronized: ") + st.detail +
                     ", systemTimeMs=" + std::to_string(st.systemTimeMs);
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-013：安装结果登记（DIAG 全权）
+//
+// 登记能力是安装前置：不可用时禁止开始新安装（清单读取与上报不受影响）。
+// 登记是成功执行收口的必要条件：失败则保持 RESULT_PENDING，用同一
+// executionId+attemptNo+idempotencyKey 重试（DIAG 侧幂等）。
+// ---------------------------------------------------------------------------
+bool FotaOrchestrator::registrationCapable(StepOutcome& outcome, const char* stage) {
+    if (registrar_ != nullptr && registrar_->available()) {
+        return true;
+    }
+    FotaLogAdapter::orchestrator().warn(
+        fota_events::DIAG_REGISTRATION_UNAVAILABLE,
+        "Installed version registration unavailable, new install blocked",
+        {flog::f_str("stage", stage),
+         flog::f_str("error_code", inventory_error::kRegistrationUnavailable)});
+    outcome.error =
+        "installed version registration unavailable (install blocked)";
+    outcome.vehicleTaskState = vtState_;
+    outcome.executionState = exState_;
+    return false;
+}
+
+InstalledVersionsReport FotaOrchestrator::buildInstalledVersionsReport() const {
+    InstalledVersionsReport report;
+    report.vehicleTaskId = frozenTask_.vehicle_task_id();
+    report.taskRevision = frozenTask_.task_revision();
+    report.executionId = executionId_;
+    report.attemptNo = attemptNo_;
+    report.idempotencyKey = executionId_ + ":" + std::to_string(attemptNo_);
+    report.appliedAtMs = nowMs();
+    // items 只来自冻结任务包清单（installedVersion = targetVersion），不从本地
+    // 清单或代码常量推算（CR-013 D2/D3）。
+    for (const auto& pkg : frozenTask_.package_list()) {
+        InstalledVersionItem item;
+        item.ecuId = pkg.ecu_id();
+        item.packageId = pkg.package_id();
+        item.packageRevision = pkg.package_revision();
+        item.installedVersion = pkg.target_version();
+        report.items.push_back(std::move(item));
+    }
+    return report;
+}
+
+bool FotaOrchestrator::registerInstalledVersions(StepOutcome& outcome) {
+    // 已登记（重启重放）：跳过登记，直接收口（CR-013 §失败、重试与恢复）。
+    if (!installedVersionRegistrationId_.empty()) {
+        return true;
+    }
+
+    // 能力不可用：不关闭本次成功执行，保持 RESULT_PENDING 等待恢复。
+    if (registrar_ == nullptr || !registrar_->available()) {
+        exState_ = ExecutionState::ResultPending;
+        persistExecution();
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::DIAG_REGISTRATION_UNAVAILABLE,
+            "Installed version registration unavailable, execution kept pending",
+            {flog::f_str("execution_id", executionId_),
+             flog::f_int("attempt_no", static_cast<int64_t>(attemptNo_)),
+             flog::f_str("error_code",
+                         inventory_error::kRegistrationUnavailable)});
+        outcome.error = "installed version registration unavailable";
+        return false;
+    }
+
+    InstalledVersionsReport report = buildInstalledVersionsReport();
+    if (report.items.empty()) {
+        // 成功执行却没有可登记条目：属于任务/映射异常，不得静默收口。
+        exState_ = ExecutionState::ResultPending;
+        persistExecution();
+        FotaLogAdapter::orchestrator().error(
+            fota_events::DIAG_REGISTRATION_REJECTED,
+            "Installed version registration has no items, execution kept pending",
+            {flog::f_str("execution_id", executionId_),
+             flog::f_str("error_code", inventory_error::kRegistrationFailed),
+             flog::f_str("reason", "empty items")});
+        outcome.error = "installed version registration has no items";
+        return false;
+    }
+
+    auto ctx = makeCtx("registry-" + executionId_);
+    RegistrationResult result =
+        registrar_->registerInstalledVersions(report, ctx);
+
+    if (result.completed()) {
+        if (result.registrationId.empty()) {
+            exState_ = ExecutionState::ResultPending;
+            persistExecution();
+            FotaLogAdapter::orchestrator().warn(
+                fota_events::DIAG_REGISTRATION_REJECTED,
+                "Registration completed without registrationId, execution kept pending",
+                {flog::f_str("execution_id", executionId_),
+                 flog::f_str("error_code", inventory_error::kRegistrationFailed)});
+            outcome.error = "registration missing registrationId";
+            return false;
+        }
+        // durable 保存登记标识后才能在内存生效（否则重启会重复登记，虽幂等）。
+        installedVersionRegistrationId_ = result.registrationId;
+        try {
+            persistExecution();
+        } catch (const std::exception& e) {
+            installedVersionRegistrationId_.clear();
+            exState_ = ExecutionState::ResultPending;
+            outcome.error = std::string("registration durable save failed: ") + e.what();
+            return false;
+        }
+        FotaLogAdapter::orchestrator().info(
+            fota_events::DIAG_REGISTRATION_ACCEPTED,
+            "Installed versions registered, execution can be closed",
+            {flog::f_str("execution_id", executionId_),
+             flog::f_int("attempt_no", static_cast<int64_t>(attemptNo_)),
+             flog::f_int("applied_count",
+                         static_cast<int64_t>(result.appliedCount)),
+             flog::f_str("disposition",
+                         registrationDispositionToString(result.disposition))});
+        return true;
+    }
+
+    if (result.rejected()) {
+        // 永久性拒绝（未知 ecuId / 非法版本 / 同键不同内容）：不无限重试。
+        // 记录 ERROR 级事件后按“登记已尽力”收口，由运维修正后触发新一轮任务。
+        std::string reasons;
+        for (const auto& it : result.rejectedItems) {
+            if (!reasons.empty()) reasons += ",";
+            reasons += it.ecuId + ":" + it.reasonCode;
+        }
+        FotaLogAdapter::orchestrator().error(
+            fota_events::DIAG_REGISTRATION_REJECTED,
+            "Installed version registration permanently rejected, closing execution",
+            {flog::f_str("execution_id", executionId_),
+             flog::f_int("attempt_no", static_cast<int64_t>(attemptNo_)),
+             flog::f_str("error_code", result.errorCode),
+             flog::f_str("reason", reasons.empty() ? result.errorDetail : reasons)});
+        return true;
+    }
+
+    // RETRYABLE_FAILED / UNAVAILABLE：保持 RESULT_PENDING，同身份重试。
+    exState_ = ExecutionState::ResultPending;
+    persistExecution();
+    FotaLogAdapter::orchestrator().warn(
+        fota_events::DIAG_REGISTRATION_REJECTED,
+        "Installed version registration failed, execution kept pending for retry",
+        {flog::f_str("execution_id", executionId_),
+         flog::f_int("attempt_no", static_cast<int64_t>(attemptNo_)),
+         flog::f_str("disposition",
+                     registrationDispositionToString(result.disposition)),
+         flog::f_str("error_code", result.errorCode),
+         flog::f_str("reason", result.errorDetail)});
+    outcome.error = "installed version registration failed: " + result.errorCode;
     return false;
 }
 
@@ -638,6 +795,12 @@ StepOutcome FotaOrchestrator::doPermit() {
     }
     o.action = "permit";
 
+    // CCU-FOTA-DSN-CR-013 D7：登记能力是安装前置。未分配/禁用/不可用时阻止
+    // 新的安装（但清单读取与上报不受影响）；已启动的成功执行不在此路径。
+    if (!registrationCapable(o, "permit")) {
+        return o;
+    }
+
     // 复检窗口与本地门禁
     std::int64_t t = nowMs();
     if (t < frozenTask_.start_time_ms() || t >= frozenTask_.end_time_ms()) {
@@ -712,6 +875,10 @@ StepOutcome FotaOrchestrator::doExecute() {
 
     // 首次：prepare + start
     if (exState_ == ExecutionState::PermitPersisted || exState_ == ExecutionState::Ready) {
+        // CCU-FOTA-DSN-CR-013 D7：安装开始前复检登记能力，不可用则不得起刷。
+        if (!registrationCapable(o, "execute")) {
+            return o;
+        }
         auto prep = exec_.prepare(frozenTask_);
         if (!prep.ready) {
             o.error = "executor prepare failed: " + prep.reason;
@@ -808,6 +975,22 @@ StepOutcome FotaOrchestrator::doFinalize() {
     if (!resp.result_accepted()) {
         o.error = "final result not accepted";
         return o;  // 等待补事件或对账
+    }
+
+    // CCU-FOTA-DSN-CR-013 D5：仅“成功安装且未被回滚”的执行需要登记。
+    // 失败/回滚成功不登记，按原终态规则收口。登记未完成时不得关闭 Execution。
+    const bool rolledBack =
+        fr.result() == ::vehicle::fota::v1::RESULT_ROLLED_BACK ||
+        finalData.rollbackOccurred || exState_ == ExecutionState::Rollback;
+    const bool retryPendingTask =
+        resp.vehicle_task_status() ==
+        ::vehicle::fota::v1::VEHICLE_TASK_STATUS_RETRY_PENDING;
+    if (!rolledBack && !retryPendingTask) {
+        if (!registerInstalledVersions(o)) {
+            o.vehicleTaskState = vtState_;
+            o.executionState = exState_;
+            return o;  // 保持 RESULT_PENDING，下次 step 用同一身份重试
+        }
     }
 
     // 日志上传

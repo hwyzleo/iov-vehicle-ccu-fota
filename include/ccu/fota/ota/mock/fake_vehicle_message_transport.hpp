@@ -587,7 +587,10 @@ FakeVehicleMessageTransport::handleFinalResult(const ::vehicle::fota::v1::FinalR
     resp.set_result_accepted(true);
     resp.set_execution_status(EXECUTION_STATUS_SUCCEEDED);
     resp.set_accepted_sequence_no(1);
-    resp.set_vehicle_task_status(VEHICLE_TASK_STATUS_COMPLETED);
+    // CCU-FOTA-DSN-CR-013 测试钩子：执行失败场景（云端要求重试/失败收口）。
+    resp.set_vehicle_task_status(scenario_.hasFault("final_retry_pending")
+                                     ? VEHICLE_TASK_STATUS_RETRY_PENDING
+                                     : VEHICLE_TASK_STATUS_COMPLETED);
     resp.set_next_action("proceed");
     finalAccepted_ = true;
     return resp;

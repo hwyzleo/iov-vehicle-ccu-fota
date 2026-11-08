@@ -44,6 +44,11 @@ run() { # run <name> <cmd...>
 gate 0 "legacy ota artifact scan (CR-011)"
 run "no-legacy-ota" bash "${ROOT}/ci/verify-no-legacy-ota.sh"
 
+# 0b. 清单常量扫描（CCU-FOTA-DSN-CR-013 / US-036 验收标准 1）
+# 清单内容唯一来源是 CCU-DIAG：生产源码/制品不得重新引入 ECU 标识、件号、基线常量。
+gate "0b" "no hardcoded ECU inventory constants (CR-013)"
+run "no-inventory-constants" bash "${ROOT}/ci/verify-no-inventory-constants.sh"
+
 # 1. CMake lint
 gate 1 "CMake lint"
 run "cmake-lint" bash "${ROOT}/ci/verify-cmake-lint.sh"

@@ -68,6 +68,8 @@ struct Harness {
     std::unique_ptr<MockVehicleConditionProvider> cond;
     std::unique_ptr<MockInstallExecutor> exec;
     std::unique_ptr<MockLogCollector> log;
+    // CCU-FOTA-DSN-CR-013：安装结果登记端口（Fake DIAG 侧）。
+    std::unique_ptr<FakeInstalledVersionRegistrar> registrar;
     std::unique_ptr<FotaOrchestrator> orch;
 
     void init(const std::string& json, bool changeDetection = true) {
@@ -84,6 +86,7 @@ struct Harness {
         cond = std::make_unique<MockVehicleConditionProvider>();
         exec = std::make_unique<MockInstallExecutor>(scenario);
         log = std::make_unique<MockLogCollector>();
+        registrar = std::make_unique<FakeInstalledVersionRegistrar>();
 
         FotaOrchestratorConfig cfg;
         cfg.inventoryChangeDetectionEnabled = changeDetection;
@@ -92,7 +95,8 @@ struct Harness {
         orch = std::make_unique<FotaOrchestrator>(
             *cloud, *inv, *consent, *dl, *cond, *exec, *log, *cloudStore, cfg,
             /*clockSync=*/nullptr,
-            [this]() { return fotaStore->allocateSnapshotSeq(); });
+            [this]() { return fotaStore->allocateSnapshotSeq(); },
+            registrar.get());
     }
 
     std::uint64_t highestSeq() const {

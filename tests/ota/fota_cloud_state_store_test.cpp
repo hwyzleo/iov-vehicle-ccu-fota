@@ -296,6 +296,50 @@ TEST_F(FotaCloudStateStoreTest, CorruptedExecutionFailsClosed) {
 }
 
 // ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-013：fota.execution v2 登记标识 round-trip
+// ---------------------------------------------------------------------------
+TEST(FotaCloudStateSerializerStandalone, ExecutionRegistrationIdRoundTrip) {
+    FotaExecutionRecord r;
+    r.executionId = "EX-1";
+    r.vehicleTaskId = "VT-1";
+    r.attemptNo = 2;
+    r.executionState = "RESULT_PENDING";
+    r.permitId = "p";
+    r.permitToken = "t";
+    r.installedVersionRegistrationId = "REG-42";
+
+    auto d = decodeExecution(encodeExecution(r));
+    EXPECT_EQ(d.schemaVersion, ccu_fota::store::fota::schema::EXECUTION_VERSION);
+    EXPECT_EQ(d.executionId, "EX-1");
+    EXPECT_EQ(d.attemptNo, 2u);
+    EXPECT_EQ(d.installedVersionRegistrationId, "REG-42");
+}
+
+// ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-013：v1 记录可升级读取（登标识为空 => 重启后重新登记，
+// DIAG 侧以 executionId+attemptNo 幂等）
+// ---------------------------------------------------------------------------
+TEST(FotaCloudStateSerializerStandalone, ExecutionV1UpgradesWithEmptyRegistrationId) {
+    FotaExecutionRecord r;
+    r.executionId = "EX-V1";
+    r.vehicleTaskId = "VT-V1";
+    r.attemptNo = 1;
+    r.executionState = "PERMIT_PERSISTED";
+    r.permitId = "p";
+    r.permitToken = "t";
+    std::string bytes = encodeExecution(r);
+    ASSERT_GE(bytes.size(), 8u);
+    // 还原为 v1 记录：schemaVersion=1（字段缺省 = 空）。
+    bytes[4] = 1; bytes[5] = 0; bytes[6] = 0; bytes[7] = 0;
+
+    auto d = decodeExecution(bytes);
+    EXPECT_EQ(d.schemaVersion, ccu_fota::store::fota::schema::EXECUTION_VERSION);
+    EXPECT_EQ(d.executionId, "EX-V1");
+    EXPECT_EQ(d.executionState, "PERMIT_PERSISTED");
+    EXPECT_TRUE(d.installedVersionRegistrationId.empty());
+}
+
+// ---------------------------------------------------------------------------
 // 序列化器：未知新版本 fail-closed
 // ---------------------------------------------------------------------------
 TEST(FotaCloudStateSerializerStandalone, UnknownNewerVersionFails) {
@@ -306,8 +350,12 @@ TEST(FotaCloudStateSerializerStandalone, UnknownNewerVersionFails) {
     r.permitId = "p";
     r.permitToken = "t";
     std::string bytes = encodeExecution(r);
-    // envelope: MAGIC(4) schemaVersion(4@off4) ... 篡改 schemaVersion 为 2。
+    // envelope: MAGIC(4) schemaVersion(4@off4) ... 篡改为“未知的新版本”。
     ASSERT_GE(bytes.size(), 8u);
-    bytes[4] = 2; bytes[5] = 0; bytes[6] = 0; bytes[7] = 0;
+    const std::uint32_t newer = ccu_fota::store::fota::schema::EXECUTION_VERSION + 1;
+    bytes[4] = static_cast<char>(newer & 0xFF);
+    bytes[5] = static_cast<char>((newer >> 8) & 0xFF);
+    bytes[6] = static_cast<char>((newer >> 16) & 0xFF);
+    bytes[7] = static_cast<char>((newer >> 24) & 0xFF);
     EXPECT_THROW(decodeExecution(bytes), StateDecodeError);
 }

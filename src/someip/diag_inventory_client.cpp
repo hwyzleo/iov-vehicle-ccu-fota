@@ -1,18 +1,30 @@
 // =============================================================================
 // src/someip/diag_inventory_client.cpp
-// CCU-FOTA DIAG Inventory Client 适配器实现 (CCU-FOTA-DSN-CR-007 §Client 设计)
+// CCU-FOTA DIAG Inventory Client 适配器实现
+// (CCU-FOTA-DSN-CR-007 §Client 设计 / CCU-FOTA-DSN-CR-013 §1 真实读取)
+// =============================================================================
+// 清单内容唯一来源是 CCU-DIAG（CR-013 D1/D2）：本适配器只做 IDL 解码与 DTO 映射，
+// 不持有、不生成、不补全任何 ECU 清单内容（源码中不得出现 ECU 标识/件号/版本常量）。
+//
+// 调用语义：
+//   * METHOD_COLLECT_VEHICLE_INVENTORY(0x0002) 单次 framework call，retry=None；
+//   * availability 非 Available 时不发起调用（ReturnCode/版本不匹配由 framework
+//     在 call 中判定，本层只做有界短路并记录）；
+//   * payload 由 DiagInventoryCodec 按 schemaVersion 解码；失败即 fail-closed
+//     （collected=false，不上报、不分配 inventoryRevision）。
 // =============================================================================
 
 #include "ccu/fota/someip/diag_inventory_client.hpp"
+
+#include "ccu/fota/someip/diag_inventory_codec.hpp"
 #include "ccu/fota/someip/error_mapper.hpp"
 #include "constants.h"
 #include "error_codes.h"
 #include "fota_log_adapter.h"
 #include "fota_log_context.h"
 
-#include <cstring>
 #include <string>
-#include <vector>
+#include <string_view>
 
 namespace ccu_fota {
 namespace someip {
@@ -20,23 +32,35 @@ namespace someip {
 using ccu::fw::someip::Availability;
 using ccu::fw::someip::CallOptions;
 using ccu::fw::someip::CallResult;
-using ccu::fw::someip::Payload;
 using ccu::fw::someip::PayloadView;
 using ccu::fw::someip::RetryMode;
 
 namespace {
 
-// ---- DIAG IDL codec（简化 wire：与既有 mock_diag_service.py 兼容）----
-// VIN 响应：纯 ASCII 字符串（17 字节）。DIAG 业务响应 return code 非 0 时由
-// framework 映射为 CallResult.fail，本 codec 只处理 success 路径。
+// framework availability -> 稳定日志标签。
+const char* availabilityLabel(Availability a) {
+    switch (a) {
+        case Availability::Available:       return "Available";
+        case Availability::Unavailable:     return "Unavailable";
+        case Availability::VersionMismatch: return "VersionMismatch";
+        case Availability::Stopping:        return "Stopping";
+        default:                            return "Unknown";
+    }
+}
+
+std::string_view payloadView(const ccu::fw::someip::Payload& payload) {
+    return std::string_view(reinterpret_cast<const char*>(payload.data()),
+                            payload.size());
+}
 
 } // namespace
 
-DiagInventoryClient::DiagInventoryClient(ccu::fw::someip::Client client,
-                                         std::chrono::milliseconds collectTimeout)
+DiagInventoryClient::DiagInventoryClient(
+    std::shared_ptr<ccu::fw::someip::Client> client,
+    std::chrono::milliseconds collectTimeout)
     : client_(std::move(client))
     , collectTimeout_(collectTimeout)
-    , hasClient_(true) {}
+    , hasClient_(client_ != nullptr) {}
 
 DiagInventoryClient::DiagInventoryClient()
     : collectTimeout_(std::chrono::milliseconds(30000))
@@ -44,28 +68,31 @@ DiagInventoryClient::DiagInventoryClient()
 
 DiagInventoryClient::~DiagInventoryClient() = default;
 
-void DiagInventoryClient::requestService() { client_.requestService(); }
-void DiagInventoryClient::releaseService() { client_.releaseService(); }
-Availability DiagInventoryClient::availability() const { return client_.availability(); }
+void DiagInventoryClient::requestService() {
+    if (client_) client_->requestService();
+}
+void DiagInventoryClient::releaseService() {
+    if (client_) client_->releaseService();
+}
+Availability DiagInventoryClient::availability() const {
+    return client_ ? client_->availability() : Availability::Unavailable;
+}
 
 ccu::fw::someip::Subscription
 DiagInventoryClient::onAvailability(ccu::fw::someip::AvailabilityCallback callback) {
-    return client_.onAvailability(std::move(callback));
+    return client_->onAvailability(std::move(callback));
 }
 
 bool DiagInventoryClient::getVin(std::string& vin) {
     if (!hasClient_) return false;
 
     // Available/VersionMismatch gating：不可用时不调用 (CR-007 §Client 设计)
-    if (client_.availability() != Availability::Available) {
+    if (client_->availability() != Availability::Available) {
         FotaLogAdapter::diag_client().warn(
             "fota.diag.unavailable",
             "DIAG service unavailable, skip VIN read",
             {flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
-             flog::f_str("availability",
-                         client_.availability() == Availability::VersionMismatch
-                             ? "VersionMismatch"
-                             : "Unavailable")});
+             flog::f_str("availability", availabilityLabel(client_->availability()))});
         return false;
     }
 
@@ -73,7 +100,7 @@ bool DiagInventoryClient::getVin(std::string& vin) {
     opts.timeout = collectTimeout_;
     opts.retry = RetryMode::None;  // framework 不自动重试 (CR-007)
 
-    CallResult result = client_.call(METHOD_READ_VIN, PayloadView{nullptr, 0}, opts);
+    CallResult result = client_->call(METHOD_READ_VIN, PayloadView{nullptr, 0}, opts);
     if (!result.success) {
         MappedError me = mapDiagCallError(result);
         FotaLogAdapter::diag_client().warn(
@@ -86,7 +113,7 @@ bool DiagInventoryClient::getVin(std::string& vin) {
         return false;
     }
 
-    // 解码 VIN：直接 ASCII（与 mock_diag_service.py 兼容）
+    // 解码 VIN：DIAG READ_VIN 响应为纯 ASCII（17 字节）。
     if (result.response.empty()) {
         return false;
     }
@@ -111,39 +138,64 @@ bool DiagInventoryClient::collectVehicleInventory(VehicleSoftwareSnapshot& snaps
         hex_id(DEFAULT_DIAG_SERVICE_ID),
         hex_id(METHOD_COLLECT_VEHICLE_INVENTORY));
 
-    // VIN 来自 DIAG
-    if (!getVin(snapshot.vin)) {
+    if (client_->availability() != Availability::Available) {
+        FotaLogAdapter::diag_client().warn(
+            "fota.diag.unavailable",
+            "DIAG service unavailable, skip inventory collect",
+            {flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
+             flog::f_str("someip_method_id",
+                         hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)),
+             flog::f_str("availability", availabilityLabel(client_->availability()))});
         return false;
     }
-    if (snapshot.vin.empty()) {
+
+    CallOptions opts;
+    opts.timeout = collectTimeout_;
+    opts.retry = RetryMode::None;  // framework 不自动重试 (CR-007)
+
+    CallResult result = client_->call(METHOD_COLLECT_VEHICLE_INVENTORY,
+                                     PayloadView{nullptr, 0}, opts);
+    if (!result.success) {
+        MappedError me = mapDiagCallError(result);
+        FotaLogAdapter::diag_client().warn(
+            fota_events::DIAG_COLLECT_FAILED,
+            "DIAG collectVehicleInventory call failed",
+            {flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
+             flog::f_str("someip_method_id",
+                         hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)),
+             flog::f_str("framework_error", result.code),
+             flog::f_str("error_code", errorCodeToString(me.code))});
         return false;
     }
 
-    // 版本清单其余字段（DIAG IDL 简化：与既有 stub 行为一致，待 DIAG IDL 落地）
-    snapshot.baseline_id = "BASELINE001";
-    snapshot.baseline_source = BaselineSource::FACTORY;
-    snapshot.registry_version = "1.0.0";
-    snapshot.collected_at = "2026-07-21T10:00:00Z";
-    snapshot.overall_result = CollectionStatus::ALL_OK;
-    snapshot.snapshot_seq = 1;
+    // wire 形态解码（未知 schemaVersion / 缺字段 / 空清单 -> fail-closed）。
+    DiagInventoryDecodeResult decoded =
+        DiagInventoryCodec::decode(payloadView(result.response));
+    if (!decoded.ok) {
+        FotaLogAdapter::diag_client().error(
+            fota_events::DIAG_INVENTORY_DECODE_FAILED,
+            "DIAG inventory payload rejected, uplink skipped",
+            {flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
+             flog::f_str("someip_method_id",
+                         hex_id(METHOD_COLLECT_VEHICLE_INVENTORY)),
+             flog::f_str("error_code", decoded.errorCode),
+             flog::f_str("reason", decoded.errorDetail)});
+        return false;
+    }
 
-    EcuVersionEntry entry1;
-    entry1.ecu_id = "ECU001";
-    entry1.part_number = "PN001";
-    entry1.sw_version = "1.0.0";
-    entry1.hw_version = "HW1.0";
-    entry1.source = VersionSource::UDS_0x22;
-    entry1.status = EcuStatus::OK;
+    snapshot = std::move(decoded.snapshot);
 
-    EcuVersionEntry entry2;
-    entry2.ecu_id = "ECU002";
-    entry2.part_number = "PN002";
-    entry2.sw_version = "2.0.0";
-    entry2.hw_version = "HW2.0";
-    entry2.source = VersionSource::SOMEIP_GET_VERSION;
-    entry2.status = EcuStatus::OK;
-
-    snapshot.ecu_list = {entry1, entry2};
+    // 只记录数量/来源/digest 相关的安全计数，不输出清单原值与 VIN。
+    FotaLogAdapter::diag_client().info(
+        fota_events::DIAG_INVENTORY_DECODED,
+        "DIAG inventory payload decoded",
+        {flog::f_str("schema_version", snapshot.schema_version),
+         flog::f_str("inventory_source",
+                     inventorySourceToString(snapshot.inventory_source)),
+         flog::f_int("ecu_count",
+                     static_cast<int64_t>(snapshot.ecu_list.size())),
+         flog::f_str("overall_result",
+                     collectionStatusToString(snapshot.overall_result))});
     return true;
 }
 

@@ -20,6 +20,7 @@
 #include "ccu/fota/ota/mock/scenario_script.hpp"
 #include "ccu/fota/ota/ports/consent_provider.hpp"
 #include "ccu/fota/ota/ports/install_executor.hpp"
+#include "ccu/fota/ota/ports/installed_version_registrar.hpp"
 #include "ccu/fota/ota/ports/inventory_provider.hpp"
 #include "ccu/fota/ota/ports/log_collector.hpp"
 #include "ccu/fota/ota/ports/package_downloader.hpp"
@@ -33,6 +34,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
+#include <map>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -349,6 +352,89 @@ private:
         evt.set_target_version("2.0.0");
         sink_->emit(evt);
     }
+};
+
+// ---------------------------------------------------------------------------
+// FakeInstalledVersionRegistrar - 与生产实现共享同一端口与同一幂等语义的
+// CCU-FOTA-DSN-CR-013 测试端（Fake DIAG 侧）：
+//   * 记录每次调用（次数/身份/items），供“登记恰一次”断言；
+//   * 以 executionId+attemptNo 去重：重复键返回 DUPLICATE（不重复应用）；
+//   * 可注入失败处置序列（RETRYABLE_FAILED/UNAVAILABLE/REJECTED_INVALID）；
+//   * 可切换 available()，模拟 Registry 未分配/接口未就绪/服务不可用。
+// ---------------------------------------------------------------------------
+class FakeInstalledVersionRegistrar : public InstalledVersionRegistrar {
+public:
+    bool available() override { return availableFlag && enabled; }
+
+    RegistrationResult registerInstalledVersions(
+        const InstalledVersionsReport& report, CallContext&) override {
+        ++callCount;
+        calls.push_back(report);
+
+        RegistrationResult r;
+        // 1. 注入的失败处置（不改变幂等状态，模拟 DIAG 未受理）。
+        //    每次调用消费一个脚本项；脚本耗尽后回到正常受理路径。
+        if (!scriptedDispositions.empty()) {
+            r.disposition = scriptedDispositions.front();
+            scriptedDispositions.pop_front();
+            if (r.disposition == RegistrationDisposition::Duplicate) {
+                // 模拟 DIAG 幂等回放：返回既有登记标识，不再变更清单。
+                r.registrationId = "REG-EXISTING";
+            } else if (r.disposition == RegistrationDisposition::RejectedInvalid) {
+                RejectedRegistrationItem item;
+                item.ecuId = report.items.empty() ? "" : report.items.front().ecuId;
+                item.reasonCode = "UNKNOWN_ECU";
+                r.rejectedItems.push_back(item);
+                r.errorCode = "FOTA-INVENTORY-REGISTRATION-REJECTED";
+            } else if (r.disposition == RegistrationDisposition::RetryableFailed) {
+                r.errorCode = "FOTA-INVENTORY-REGISTRATION-FAILED";
+            } else if (r.disposition == RegistrationDisposition::Unavailable) {
+                r.errorCode = "FOTA-INVENTORY-REGISTRATION-UNAVAILABLE";
+            }
+            return r;
+        }
+
+        // 2. 幂等去重：同一 executionId+attemptNo 返回既有 registrationId。
+        auto it = applied.find(report.idempotencyKey);
+        if (it != applied.end()) {
+            r.disposition = RegistrationDisposition::Duplicate;
+            r.registrationId = it->second;
+            r.appliedCount = 0;
+            ++duplicateCount;
+            return r;
+        }
+
+        // 3. 正常受理：单次原子“应用”，记录登记标识。
+        const std::string registrationId =
+            "REG-" + std::to_string(applied.size() + 1);
+        applied.emplace(report.idempotencyKey, registrationId);
+        r.disposition = RegistrationDisposition::Applied;
+        r.registrationId = registrationId;
+        r.appliedCount = static_cast<std::uint32_t>(report.items.size());
+        r.effectiveRevision = ++effectiveRevision;
+        appliedItems[idempotencyKey(report)] = report.items;
+        ++appliedCountTotal;
+        return r;
+    }
+
+    static std::string idempotencyKey(const InstalledVersionsReport& r) {
+        return r.executionId + ":" + std::to_string(r.attemptNo);
+    }
+
+    // ---- 测试控制 ----
+    bool availableFlag = true;
+    bool enabled = true;
+    // 依次消费的失败处置；脚本耗尽后按正常受理路径（幂等）处理。
+    std::deque<RegistrationDisposition> scriptedDispositions;
+
+    int callCount = 0;
+    int appliedCountTotal = 0;
+    int duplicateCount = 0;
+    std::uint64_t effectiveRevision = 0;
+    std::vector<InstalledVersionsReport> calls;
+    std::map<std::string, std::string> applied;  // key -> registrationId
+    // 每个幂等键实际“应用”的 items（用于断言重试不改变内容且只应用一次）。
+    std::map<std::string, std::vector<InstalledVersionItem>> appliedItems;
 };
 
 } // namespace mock

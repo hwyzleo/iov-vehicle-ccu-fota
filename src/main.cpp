@@ -4,6 +4,8 @@
 #include "ccu/fota/store/fota_cloud_state_store.hpp"
 #include "ccu/fota/store/fota_state_migration.hpp"
 #include "ccu/fota/someip/diag_inventory_client.hpp"
+#include "ccu/fota/someip/diag_installed_version_registrar.hpp"
+#include "ccu/fota/ota/inventory_error_codes.hpp"
 #include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
 #include "ccu/fota/ota/ports/production_ports.hpp"
 #include "ccu/fota/daemon/fota_daemon.hpp"
@@ -151,11 +153,40 @@ int main(int argc, char* argv[]) {
     someip_fw::ServiceKey diagKey{DEFAULT_DIAG_SERVICE_ID, DEFAULT_DIAG_INSTANCE_ID};
     someip_fw::InterfaceVersion ifaceV{1, 0};
 
-    someip_fw::Client fwDiagClient = runtime.createClient(diagKey, ifaceV);
+    // 同一 DIAG Service/Instance 只创建一个 framework Client，并由清单适配器与
+    // 安装结果登记适配器共享（framework 对同一服务重复 requestService 会拒绝；
+    // CCU-FOTA-DSN-CR-013 的登记走同一 Service 的另一 Method）。
+    auto fwDiagClient = std::make_shared<someip_fw::Client>(
+        runtime.createClient(diagKey, ifaceV));
 
     // ---- 3. 构造业务适配器（包装 framework Client）----
     auto diag_client = std::make_shared<someip::DiagInventoryClient>(
-        std::move(fwDiagClient), fotaConfig.diagCollectTimeout);
+        fwDiagClient, fotaConfig.diagCollectTimeout);
+
+    // 安装结果登记适配器（Method ID/接口版本来自 Registry 运行下发；0 = 未分配）。
+    someip::DiagInstalledVersionRegistrarConfig registrar_cfg;
+    registrar_cfg.methodId = fotaConfig.diagRegistration.methodId;
+    registrar_cfg.interfaceMajor = fotaConfig.diagRegistration.interfaceMajor;
+    registrar_cfg.interfaceMinor = 0;
+    registrar_cfg.enabled = fotaConfig.diagRegistration.enabled;
+    registrar_cfg.timeout = fotaConfig.diagRegistration.timeout;
+    auto diag_registrar = std::make_shared<someip::DiagInstalledVersionRegistrar>(
+        fwDiagClient, registrar_cfg);
+    if (!registrar_cfg.enabled || registrar_cfg.methodId == 0) {
+        // 能力关闭：读清单与上报不受影响，但禁止开始新的安装（不得猜 ID）。
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::DIAG_REGISTRATION_UNAVAILABLE,
+            "Installed version registration capability unavailable",
+            {flog::f_str("someip_service_id", hex_id(DEFAULT_DIAG_SERVICE_ID)),
+             flog::f_str("error_code",
+                         registrar_cfg.enabled
+                             ? ota::inventory_error::kRegistrationIdUnallocated
+                             : ota::inventory_error::kRegistrationUnavailable),
+             flog::f_str("reason",
+                         registrar_cfg.enabled
+                             ? "registration method id not allocated by Registry"
+                             : "registration disabled by configuration")});
+    }
 
     auto assembler = std::make_shared<SnapshotAssembler>(diag_client);
     // CCU-FOTA-DSN-CR-012：契约 B 任务检测路径不再使用“上报节流”抑制采集；
@@ -308,7 +339,7 @@ int main(int argc, char* argv[]) {
                 std::move(prod_dl), std::move(prod_cond),
                 std::move(prod_exec), std::move(prod_log),
                 cloud_state_store, std::move(prod_clock),
-                std::move(revision_allocator));
+                std::move(revision_allocator), diag_registrar);
             fota_daemon->start();  // transport -> 下行订阅 -> reconcile -> 触发
 
             FotaLogAdapter::orchestrator().info(

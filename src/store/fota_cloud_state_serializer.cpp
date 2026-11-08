@@ -286,14 +286,30 @@ std::string encodeExecution(const FotaExecutionRecord& r) {
         {"installPlanVersion", r.installPlanVersion},
         {"checkpointPbHex", r.checkpointPbHex},
         {"offlinePolicyPbHex", r.offlinePolicyPbHex},
-        {"timeoutPolicyPbHex", r.timeoutPolicyPbHex}};
+        {"timeoutPolicyPbHex", r.timeoutPolicyPbHex},
+        {"installedVersionRegistrationId", r.installedVersionRegistrationId}};
     return encodeEnvelope(r.schemaVersion, j.dump());
 }
 
 FotaExecutionRecord decodeExecution(const std::string& bytes) {
-    json j = decodeEnvelopeJson(bytes, schema::EXECUTION_VERSION, "execution");
+    // CCU-FOTA-DSN-CR-013：v1 -> v2 兼容读取。v1 无登记标识，读到后置空
+    // （进程重启后会重新登记，DIAG 侧以 executionId+attemptNo 幂等）。
+    EnvelopeHeader h = parseEnvelopeHeader(bytes);
+    if (h.schemaVersion > schema::EXECUTION_VERSION) {
+        throw StateDecodeError("execution unknown newer schemaVersion: " +
+                               std::to_string(h.schemaVersion));
+    }
+    std::string payload = extractPayload(bytes, h);
+    json j;
+    try {
+        j = json::parse(payload);
+    } catch (const json::exception& e) {
+        throw StateDecodeError(std::string("execution json parse failed: ") +
+                               e.what());
+    }
+
     FotaExecutionRecord r;
-    r.schemaVersion = j.value("schemaVersion", schema::EXECUTION_VERSION);
+    r.schemaVersion = schema::EXECUTION_VERSION;
     r.vehicleTaskId = getStr(j, "vehicleTaskId");
     r.executionId = getStr(j, "executionId");
     r.attemptNo = j.at("attemptNo").get<std::uint32_t>();
@@ -306,6 +322,8 @@ FotaExecutionRecord decodeExecution(const std::string& bytes) {
     r.checkpointPbHex = getStrOpt(j, "checkpointPbHex", "");
     r.offlinePolicyPbHex = getStrOpt(j, "offlinePolicyPbHex", "");
     r.timeoutPolicyPbHex = getStrOpt(j, "timeoutPolicyPbHex", "");
+    r.installedVersionRegistrationId =
+        getStrOpt(j, "installedVersionRegistrationId", "");
     return r;
 }
 

@@ -87,6 +87,21 @@ struct GenericTransportSpec {
 };
 
 // ---------------------------------------------------------------------------
+// DiagRegistrationSpec - 安装结果登记能力与寻址 (CCU-FOTA-DSN-CR-013)
+// Method ID / 接口版本由 VEH-SOMEIP Registry 分配并经运行配置注入；0 = 未分配
+// （能力关闭，禁止猜测 ID）。禁用/未分配只表示“能力不可用”（阻止新安装），
+// 不构成“跳过登记”的许可。
+// ---------------------------------------------------------------------------
+struct DiagRegistrationSpec {
+    bool enabled = true;
+    std::uint16_t methodId = 0;      // Registry 分配的 METHOD_RECORD_INSTALLED_VERSIONS
+    std::uint8_t interfaceMajor = 1; // DIAG 接口 major 版本
+    std::chrono::milliseconds timeout{30000};
+
+    bool allocated() const { return enabled && methodId != 0; }
+};
+
+// ---------------------------------------------------------------------------
 // MockConfig - fota.mock.* 测试桩配置 (CCU-FOTA-DSN-CR-009 §构建与运行隔离)
 // 量产 profile 必须为 OFF；启用时健康状态/日志/指标标记 NON_PRODUCTION。
 // ---------------------------------------------------------------------------
@@ -114,6 +129,8 @@ struct FotaConfig {
     // diag.*
     std::chrono::milliseconds diagCollectTimeout;
     RetryConfig diagRetry;
+    // 安装结果登记能力/寻址 (CCU-FOTA-DSN-CR-013)
+    DiagRegistrationSpec diagRegistration;
 
     // fota.someip.transport.* / fota.someip.generic_transport.* (CR-010/011 契约 B)
     SomeIpTransportConfig transport;

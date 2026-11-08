@@ -70,6 +70,106 @@ TEST(FotaConfigTest, DefaultsWhenKeysAbsent) {
 }
 
 // ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-013：安装结果登记配置（缺省/映射/边界/未知字段）
+// ---------------------------------------------------------------------------
+TEST(FotaConfigTest, DiagRegistrationDefaults) {
+    TempDir root;
+    auto snap = loadFota(root, "fota:\n  log: {}\n");
+    FotaConfig c = FotaConfig::from(*snap);
+
+    // 缺省：能力“可用但未寻址”——Method ID 未分配（0）=> 实际能力关闭。
+    EXPECT_TRUE(c.diagRegistration.enabled);
+    EXPECT_EQ(c.diagRegistration.methodId, 0);
+    EXPECT_EQ(c.diagRegistration.interfaceMajor, 1);
+    EXPECT_EQ(c.diagRegistration.timeout.count(), 30000);
+    EXPECT_FALSE(c.diagRegistration.allocated());
+}
+
+TEST(FotaConfigTest, DiagRegistrationOverridesMapped) {
+    TempDir root;
+    auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      enabled: true
+      method_id: 5
+      interface_major: 1
+      timeout_ms: 4500
+  log: {}
+)");
+    FotaConfig c = FotaConfig::from(*snap);
+    EXPECT_TRUE(c.diagRegistration.enabled);
+    EXPECT_EQ(c.diagRegistration.methodId, 5);
+    EXPECT_TRUE(c.diagRegistration.allocated());
+    EXPECT_EQ(c.diagRegistration.timeout.count(), 4500);
+}
+
+TEST(FotaConfigTest, DiagRegistrationValidationFailsClosed) {
+    // method_id 越出 SOME/IP method 范围。
+    {
+        TempDir root;
+        auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      method_id: 32768
+  log: {}
+)");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // interface_major 与 DIAG 接口不一致。
+    {
+        TempDir root;
+        auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      interface_major: 2
+  log: {}
+)");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // timeout 下界。
+    {
+        TempDir root;
+        auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      timeout_ms: 0
+  log: {}
+)");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // 未知字段（additionalProperties:false 的运行时等价）。
+    {
+        TempDir root;
+        auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      method: 5
+  log: {}
+)");
+        EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+    }
+    // 禁用后 allocated() 为假（能力不可用，不是“跳过登记”的许可）。
+    {
+        TempDir root;
+        auto snap = loadFota(root, R"(
+fota:
+  diag:
+    registration:
+      enabled: false
+      method_id: 5
+  log: {}
+)");
+        FotaConfig c = FotaConfig::from(*snap);
+        EXPECT_FALSE(c.diagRegistration.allocated());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 覆盖值正确映射到类型化结构。
 // ---------------------------------------------------------------------------
 TEST(FotaConfigTest, OverridesMapped) {

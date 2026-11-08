@@ -38,6 +38,17 @@ enum class VinSource {
     UNKNOWN
 };
 
+// 清单来源（CCU-FOTA-DSN-CR-013 D8 / US-038）。
+// 权威性由 CCU-DIAG 内部决定（seed 兜底或真实硬件诊断），FOTA 只透出到日志/指标，
+// 不在 wire 上新增私有字段。
+//
+// 注意：本枚举不是清单内容的一部分，也不参与 digest/指纹计算。
+enum class InventorySource {
+    HARDWARE,
+    SEED,
+    UNKNOWN
+};
+
 // 枚举转字符串（用于日志输出，CCU-FOTA-DSN-CR-003）
 inline const char* versionSourceToString(VersionSource s) {
     switch (s) {
@@ -82,6 +93,14 @@ inline const char* vinSourceToString(VinSource s) {
     }
 }
 
+inline const char* inventorySourceToString(InventorySource s) {
+    switch (s) {
+        case InventorySource::HARDWARE: return "hardware";
+        case InventorySource::SEED:     return "seed";
+        default:                        return "unknown";
+    }
+}
+
 struct EcuVersionEntry {
     std::string ecu_id;
     std::optional<std::string> part_number;
@@ -93,6 +112,11 @@ struct EcuVersionEntry {
 };
 
 struct VehicleSoftwareSnapshot {
+    // DIAG 清单 payload 的编码版本（CCU-FOTA-DSN-CR-013 §1）。
+    // 未知版本 fail-closed：不得猜测字段或降级解码。
+    std::string schema_version;
+    // 清单来源（hardware | seed），仅用于观测（US-038）。
+    InventorySource inventory_source = InventorySource::UNKNOWN;
     std::string vin;
     VinSource vin_source = VinSource::UNKNOWN;
     std::optional<std::string> baseline_id;

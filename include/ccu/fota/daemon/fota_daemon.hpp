@@ -23,6 +23,7 @@
 #include "ccu/fota/config/fota_config.hpp"
 #include "ccu/fota/ota/fota_cloud_proxy_via_transport.hpp"
 #include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/ota/ports/installed_version_registrar.hpp"
 #include "ccu/fota/ota/someip_vehicle_message_transport.hpp"
 #include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
 #include "ccu/fota/store/fota_cloud_state_store.hpp"
@@ -62,7 +63,8 @@ public:
         std::shared_ptr<ota::LogCollector> log,
         std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
         std::shared_ptr<ota::ClockSyncProvider> clockSync = nullptr,
-        ota::RevisionAllocator revisionAllocator = nullptr);
+        ota::RevisionAllocator revisionAllocator = nullptr,
+        std::shared_ptr<ota::InstalledVersionRegistrar> registrar = nullptr);
 
     ~FotaDaemon();
 
@@ -95,7 +97,8 @@ private:
                std::shared_ptr<ota::LogCollector> log,
                std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore,
                std::shared_ptr<ota::ClockSyncProvider> clockSync,
-               ota::RevisionAllocator revisionAllocator);
+               ota::RevisionAllocator revisionAllocator,
+               std::shared_ptr<ota::InstalledVersionRegistrar> registrar);
 
     void timerLoop();
     // 记录 step 结果中需要运维可见的状态（当前：等待时钟同步的进入/退出）。
@@ -119,6 +122,8 @@ private:
     std::shared_ptr<ota::LogCollector> log_;
     std::shared_ptr<store::fota::FotaCloudStateStore> cloudStore_;
     std::shared_ptr<ota::ClockSyncProvider> clockSync_;
+    // 安装结果登记端口（CCU-FOTA-DSN-CR-013）；可为空 = 能力不可用。
+    std::shared_ptr<ota::InstalledVersionRegistrar> registrar_;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{false};
