@@ -89,8 +89,13 @@ public:
     // 云端已建立的清单版本个数（按 revision 去重）。
     std::size_t inventoryVersionCount() const;
     std::uint64_t cloudInventoryRevision() const;
-    // 最后一次 TaskCheck 请求（用于断言 mode/revision/local status）。
+    // 最后的 TaskCheck 请求（用于断言 mode/revision/local status）。
     ::vehicle::fota::v1::TaskCheckRequest lastTaskCheck() const;
+
+    // 最后一次最终结果上报（用于断言 Result/回滚事实/失败非成功）。
+    ::vehicle::fota::v1::FinalResultReport lastFinalResult() const {
+        return lastFinalResult_;
+    }
 
 private:
     ScenarioScript scenario_;
@@ -113,6 +118,7 @@ private:
     bool installDeniedOnce_ = false;
     bool eventDroppedOnce_ = false;
     bool eventReorderOnce_ = false;
+    ::vehicle::fota::v1::FinalResultReport lastFinalResult_;
     bool cloudTimeoutOnce_ = false;
 
     // 清单记账状态（CR-012）。
@@ -448,15 +454,17 @@ FakeVehicleMessageTransport::handleTaskCheck(
     for (const auto& sp : scenario_.packages) {
         auto* p = task->add_package_list();
         p->set_package_id(sp.packageId);
-        p->set_package_revision("prev-1");
-        p->set_plan_node_id("NODE-1");
-        p->set_ecu_id("VCU-001");
-        p->set_source_version("1.0.0");
-        p->set_target_version("2.0.0");
-        p->set_size_bytes(sp.bytes);
+        p->set_package_revision(sp.packageRevision);
+        p->set_plan_node_id(sp.planNodeId);
+        p->set_ecu_id(sp.ecuId);
+        if (!sp.componentId.empty()) p->set_component_id(sp.componentId);
+        p->set_source_version(sp.sourceVersion);
+        p->set_target_version(sp.targetVersion);
+        p->set_size_bytes(static_cast<std::uint64_t>(sp.bytes));
         p->mutable_package_digest()->set_algorithm("sha-256");
-        p->mutable_package_digest()->set_value_hex(std::string(64, 'e'));
-        p->set_differential_type("full");
+        p->mutable_package_digest()->set_value_hex(sp.packageDigestHex);
+        p->set_differential_type(sp.differentialType);
+        p->set_encrypted(sp.encrypted);
     }
     return resp;
 }
@@ -488,12 +496,19 @@ FakeVehicleMessageTransport::handleDownload(const ::vehicle::fota::v1::DownloadG
     DownloadGrantResponse resp;
     resp.mutable_status()->set_code("0");
     resp.set_next_action("proceed");
-    resp.set_package_revision("prev-1");
+    const ScenarioPackage* sp = nullptr;
+    for (const auto& p : scenario_.packages) {
+        if (p.packageId == req.package_id()) { sp = &p; break; }
+    }
+    const std::string revision = sp != nullptr ? sp->packageRevision : "prev-1";
+    resp.set_package_revision(revision);
     resp.set_download_url("mock://cdn/" + req.package_id());
     resp.set_expires_at_ms(INT64_MAX);
-    resp.set_size_bytes(1048576);
+    resp.set_size_bytes(sp != nullptr ? static_cast<std::uint64_t>(sp->bytes)
+                                      : 1048576ULL);
     resp.mutable_package_digest()->set_algorithm("sha-256");
-    resp.mutable_package_digest()->set_value_hex(std::string(64, 'e'));
+    resp.mutable_package_digest()->set_value_hex(
+        sp != nullptr ? sp->packageDigestHex : std::string(64, 'e'));
     resp.set_etag("etag-" + req.package_id());
     resp.set_supports_range(true);
     if (scenario_.hasFault("etag_changed") && !etagChangedOnce_) {
@@ -580,8 +595,9 @@ FakeVehicleMessageTransport::handleControlAck(const ::vehicle::fota::v1::Control
 }
 
 inline ::vehicle::fota::v1::FinalResultResponse
-FakeVehicleMessageTransport::handleFinalResult(const ::vehicle::fota::v1::FinalResultReport&) {
+FakeVehicleMessageTransport::handleFinalResult(const ::vehicle::fota::v1::FinalResultReport& req) {
     using namespace ::vehicle::fota::v1;
+    lastFinalResult_ = req;
     FinalResultResponse resp;
     resp.mutable_status()->set_code("0");
     resp.set_result_accepted(true);

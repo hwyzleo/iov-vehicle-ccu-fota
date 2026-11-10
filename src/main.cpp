@@ -8,6 +8,7 @@
 #include "ccu/fota/ota/inventory_error_codes.hpp"
 #include "ccu/fota/someip/tbox_generic_transport_contract.hpp"
 #include "ccu/fota/ota/ports/production_ports.hpp"
+#include "ccu/fota/daemon/vehicle_port_gate.hpp"
 #include "ccu/fota/daemon/fota_daemon.hpp"
 #include "config.h"          // ccu::fw::config::Config / LoadOptions / ConfigException
 #include "constants.h"
@@ -125,6 +126,47 @@ int main(int argc, char* argv[]) {
                   << std::endl;
         return 1;
     }
+
+    // ---- 5a. 车内副作用端口装配门禁 (CCU-FOTA-DSN-CR-015 §D1/D2) ----
+    // 双重门禁：FOTA_ENABLE_TEST_DOUBLES=ON（构建）+ fota.mock.enabled=true（运行）。
+    // ON 但 enabled=false 仍为 Conservative；OFF 构建在 enabled=true 时 fail-closed。
+    // 选择在开放传输与业务触发前一次性完成；真实组件失败不得动态回退 Mock。
+    // Inventory/Registrar/Clock/Transport 始终在本装配之外使用真实实现。
+    ccu_fota::daemon::VehicleSidePorts vehicle_ports;
+    try {
+        vehicle_ports = ccu_fota::daemon::assembleVehicleSidePorts(fotaConfig);
+    } catch (const FotaConfigException& e) {
+        FotaLogAdapter::orchestrator().error(
+            fota_events::MOCK_SCENARIO_FAILED,
+            "Vehicle-side port assembly rejected",
+            {flog::f_str("error_code", "CCU-FOTA-MOCK-CONFIG"),
+             flog::f_str("reason", e.what())});
+        std::cerr << "FATAL: vehicle-side port assembly failed: " << e.what()
+                  << std::endl;
+        return 1;
+    } catch (const std::exception& e) {
+        std::cerr << "FATAL: vehicle-side port assembly failed: " << e.what()
+                  << std::endl;
+        return 1;
+    }
+
+    FotaLogAdapter::orchestrator().info(
+        fota_events::SERVICE_PROFILE, "Build/runtime profile resolved",
+        {flog::f_str("profile", vehicle_ports.mock.profile),
+         flog::f_bool("mock_activated", vehicle_ports.mock.activated)});
+#ifdef FOTA_ENABLE_TEST_DOUBLES
+    if (vehicle_ports.mock.activated) {
+        // 显式 NON_PRODUCTION 标识：至少含 profile、场景名与场景摘要；
+        // 不输出场景敏感原文。量产 OFF 构建不编译本分支（无 Mock 事件字符串）。
+        FotaLogAdapter::orchestrator().info(
+            fota_events::MOCK_ACTIVATED,
+            "NON_PRODUCTION in-vehicle Mock ports activated",
+            {flog::f_str("profile", vehicle_ports.mock.profile),
+             flog::f_str("scenario", vehicle_ports.mock.scenarioName),
+             flog::f_str("scenario_digest",
+                         vehicle_ports.mock.scenarioDigestHex)});
+    }
+#endif
 
     // ============================================================
     // CCU-FOTA-DSN-CR-007: 单 ccu-framework-someip Runtime 接线
@@ -273,14 +315,15 @@ int main(int argc, char* argv[]) {
         }
 
         try {
-            // 生产车内端口（复用契约 A 采集；其余 fail-closed 保守占位，独立边界）。
+            // 车内端口：Conservative（量产 / 未启用 Mock）或 NON_PRODUCTION Mock；
+            // 清单采集、安装结果登记、时钟与传输始终为真实实现（CR-015 §D2）。
             auto prod_inv = std::make_shared<ccu_fota::ota::InventoryProviderFromAssembler>(
                 assembler, fotaConfig.cloud.protocolVersion);
-            auto prod_consent = std::make_shared<ccu_fota::ota::ConservativeConsentProvider>();
-            auto prod_dl = std::make_shared<ccu_fota::ota::ConservativePackageDownloader>();
-            auto prod_cond = std::make_shared<ccu_fota::ota::ConservativeVehicleConditionProvider>();
-            auto prod_exec = std::make_shared<ccu_fota::ota::ConservativeInstallExecutor>();
-            auto prod_log = std::make_shared<ccu_fota::ota::ConservativeLogCollector>();
+            auto prod_consent = vehicle_ports.consent;
+            auto prod_dl = vehicle_ports.downloader;
+            auto prod_cond = vehicle_ports.conditions;
+            auto prod_exec = vehicle_ports.executor;
+            auto prod_log = vehicle_ports.logCollector;
 
             // 时钟门禁判定来源：上行 Envelope 的 timestamp_ms/expire_at_ms 由
             // CLOCK_REALTIME 推导，CCU 上电后 RTC 可能尚未与可信时间源同步，

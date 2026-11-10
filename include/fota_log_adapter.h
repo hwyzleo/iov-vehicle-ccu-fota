@@ -47,8 +47,19 @@ constexpr const char* INVENTORY_IDENTITY_FAILED     = "fota.inventory.identity.f
 constexpr const char* SERVICE_STARTING           = "fota.service.starting";
 constexpr const char* SERVICE_CONFIG_LOADED      = "fota.service.config_loaded";
 constexpr const char* SERVICE_LOG_INITIALIZED    = "fota.service.log_initialized";
+constexpr const char* SERVICE_PROFILE            = "fota.service.profile";
 constexpr const char* SERVICE_READY              = "fota.service.ready";
 constexpr const char* SERVICE_SHUTTING_DOWN      = "fota.service.shutting_down";
+// NON_PRODUCTION Mock 联调 (CCU-FOTA-DSN-CR-015 §D1/D7)
+// 日志只记录 profile / 场景名 / 场景摘要 / stage / 包身份，不输出场景敏感原文。
+constexpr const char* MOCK_ACTIVATED             = "fota.mock.activated";
+constexpr const char* MOCK_SCENARIO_FAILED       = "fota.mock.scenario.failed";
+constexpr const char* MOCK_DOWNLOAD_RESULT       = "fota.mock.download.result";
+constexpr const char* MOCK_EXECUTION_STAGE       = "fota.mock.execution.stage";
+constexpr const char* MOCK_RESULT_ASSEMBLED      = "fota.mock.result.assembled";
+// OTA 编排观测（CR-015 §D5/D7）
+constexpr const char* OTA_FINAL_RESULT           = "fota.ota.final_result";
+constexpr const char* OTA_EXECUTION_RESTORED     = "fota.ota.execution.restored";
 // Store / persistence (CCU-FOTA-DSN-CR-005)
 // 日志只记 key/phase/format_version/attempt/error_code；禁止 payload/VIN/device_sn。
 constexpr const char* STORE_OPEN_FAILED          = "fota.store.open.failed";

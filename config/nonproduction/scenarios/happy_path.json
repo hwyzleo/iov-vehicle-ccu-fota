@@ -1,0 +1,18 @@
+{
+  "scenario": "nonproduction-happy-path",
+  "clock": "realtime",
+  "inventory": {
+    "mode": "FULL",
+    "baseline": "BASE-NONPROD-001",
+    "fota_master_version": "1.0.0"
+  },
+  "packages": [],
+  "executor": {
+    "stages": [
+      {"stage": "INSTALL", "progress": [25, 50, 75, 100], "result": "SUCCEEDED"},
+      {"stage": "REBOOT", "progress": [100], "result": "SUCCEEDED"},
+      {"stage": "POST_CHECK", "progress": [100], "result": "SUCCEEDED"}
+    ]
+  },
+  "faults": []
+}

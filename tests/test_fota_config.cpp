@@ -531,3 +531,40 @@ TEST(FotaConfigTest, GenericTransportPartialOrInvalidRejected) {
         EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
     }
 }
+
+// ---------------------------------------------------------------------------
+// CCU-FOTA-DSN-CR-015 §D1/D2：NON_PRODUCTION Mock 配置门禁
+//   * OFF（量产）构建：fota.mock.enabled=true 一律拒绝；
+//   * ON（NON_PRODUCTION）构建：enabled=true 时 scenario_path 必填。
+// 可读性与场景内容校验由装配层（assembleMockVehiclePorts）在开放传输前完成。
+// ---------------------------------------------------------------------------
+#if FOTA_LIB_TEST_DOUBLES
+TEST(FotaConfigTest, MockEnabledRequiresScenarioPathInNonProductionBuild) {
+    TempDir root;
+    auto snap = loadFota(root, "fota:\n  mock:\n    enabled: true\n  log: {}\n");
+    EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+
+    TempDir ok;
+    auto okSnap = loadFota(ok,
+        "fota:\n"
+        "  mock:\n"
+        "    enabled: true\n"
+        "    scenario_path: /tmp/scenario.json\n"
+        "  log: {}\n");
+    FotaConfig c = FotaConfig::from(*okSnap);
+    EXPECT_TRUE(c.mock.enabled);
+    EXPECT_EQ(c.mock.scenarioPath, "/tmp/scenario.json");
+    EXPECT_FALSE(c.mock.virtualClock);
+}
+#else
+TEST(FotaConfigTest, MockEnabledRejectedInProductionBuild) {
+    TempDir root;
+    auto snap = loadFota(root,
+        "fota:\n"
+        "  mock:\n"
+        "    enabled: true\n"
+        "    scenario_path: /tmp/scenario.json\n"
+        "  log: {}\n");
+    EXPECT_THROW(FotaConfig::from(*snap), FotaConfigException);
+}
+#endif

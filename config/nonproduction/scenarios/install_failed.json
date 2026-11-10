@@ -1,0 +1,12 @@
+{
+  "scenario": "nonproduction-install-failed",
+  "clock": "realtime",
+  "packages": [],
+  "executor": {
+    "stages": [
+      {"stage": "INSTALL", "progress": [50], "result": "SUCCEEDED"},
+      {"stage": "POST_CHECK", "progress": [100], "result": "SUCCEEDED"}
+    ]
+  },
+  "faults": ["install_failed"]
+}

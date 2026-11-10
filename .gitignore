@@ -33,6 +33,7 @@
 
 # Build directory
 build/
+build-nonproduction/
 cmake-build-*/
 
 # IDE

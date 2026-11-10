@@ -162,6 +162,10 @@ private:
     // 已登记标识（fota.execution.installedVersionRegistrationId）。非空 => 该
     // Execution 已登记，重启重放时跳过登记（CR-013 §失败、重试与恢复）。
     std::string installedVersionRegistrationId_;
+    // 本进程是否已完成执行器 prepare（CR-015 §D5）：恢复活动 Execution 时必须先
+    // 用持久化 frozenTask 重新 prepare，再按 checkpoint resume；不得直接读取空的
+    // 最终结果。false 时 doExecute 会先 prepare。
+    bool executorPrepared_ = false;
     std::uint64_t lastReceivedControlRev_ = 0;
     std::uint64_t lastAppliedControlRev_ = 0;
     std::vector<std::string> pendingControlIds_;

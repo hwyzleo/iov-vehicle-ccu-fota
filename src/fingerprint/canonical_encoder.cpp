@@ -90,6 +90,24 @@ void CanonicalEncoder::writeEnumField(std::uint16_t fieldId, std::uint32_t code)
     ++fieldCount_;
 }
 
+void CanonicalEncoder::writeUint64Field(std::uint16_t fieldId, std::uint64_t value) {
+    putFieldHeader(fieldId, FieldState::Present, 8);
+    putU32Be(static_cast<std::uint32_t>((value >> 32) & 0xFFFFFFFFu));
+    putU32Be(static_cast<std::uint32_t>(value & 0xFFFFFFFFu));
+    ++fieldCount_;
+}
+
+void CanonicalEncoder::writeDoubleField(std::uint16_t fieldId, double value) {
+    // IEEE-754 bit pattern（不格式化十进制，避免 locale / 精度差异）。
+    std::uint64_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "double must be 64-bit IEEE-754");
+    std::memcpy(&bits, &value, sizeof(bits));
+    putFieldHeader(fieldId, FieldState::Present, 8);
+    putU32Be(static_cast<std::uint32_t>((bits >> 32) & 0xFFFFFFFFu));
+    putU32Be(static_cast<std::uint32_t>(bits & 0xFFFFFFFFu));
+    ++fieldCount_;
+}
+
 void CanonicalEncoder::writeBytesField(std::uint16_t fieldId,
                                        const std::uint8_t* data, std::size_t size) {
     putFieldHeader(fieldId, FieldState::Present, static_cast<std::uint32_t>(size));

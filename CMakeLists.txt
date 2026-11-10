@@ -64,12 +64,23 @@ set(FOTA_SOURCES
     src/ota/state/execution_state.cpp
     src/ota/state/state_proto.cpp
     src/ota/fota_orchestrator.cpp
+    src/ota/fota_digest.cpp
     src/ota/inventory_identity_planner.cpp
     src/ota/fota_cloud_proxy_via_transport.cpp
     src/ota/someip_vehicle_message_transport.cpp
     src/ota/production_ports.cpp
     src/daemon/fota_daemon.cpp
+    src/daemon/vehicle_side_ports.cpp
 )
+
+# CCU-FOTA-DSN-CR-015 §D1: NON_PRODUCTION Mock 接线与场景源码只在显式开启
+# FOTA_ENABLE_TEST_DOUBLES 的独立构建目录中编译。量产 OFF 构建不包含 Mock
+# 符号、场景解析与 Mock daemon 装配。
+if(FOTA_ENABLE_TEST_DOUBLES)
+    list(APPEND FOTA_SOURCES
+        src/ota/mock/scenario_script.cpp
+        src/daemon/mock_side_ports.cpp)
+endif()
 
 # Internal object collection (NOT installed / NOT exported). Lets the daemon
 # and HOST tests share compiled objects without exposing a public target.
@@ -79,6 +90,12 @@ target_include_directories(ccu_fota_lib
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>")
 target_compile_features(ccu_fota_lib PUBLIC cxx_std_20)
+
+# CR-015 §D1：构建门禁宏同时作用于库与 daemon（配置校验 + 装配选择）。
+# 运行时仍需 fota.mock.enabled=true 才装配 Mock（双重门禁）。
+if(FOTA_ENABLE_TEST_DOUBLES)
+    target_compile_definitions(ccu_fota_lib PUBLIC FOTA_ENABLE_TEST_DOUBLES=1)
+endif()
 target_link_libraries(ccu_fota_lib
     PUBLIC
         CCUFramework::ccu-framework-config
@@ -142,9 +159,18 @@ if(FOTA_BUILD_TESTS)
         tests/ota/inventory_provider_test.cpp
         tests/ota/installed_version_registration_test.cpp
         tests/ota/diag_inventory_end_to_end_test.cpp
-        # Mock scenario 仅测试 target 编译（NON_PRODUCTION，CR-009 §构建与运行隔离）
-        src/ota/mock/scenario_script.cpp
+        tests/ota/fota_digest_test.cpp
+        tests/ota/nonproduction_assembly_test.cpp
+        tests/ota/mock_task_driven_test.cpp
     )
+    # Mock 场景/Mock 装配源码：仅在库未编译它们时由测试 target 自行编译
+    # （OFF 构建的默认测试口径）。OFF 构建的 lib 不含 Mock 符号，测试 target
+    # 以 FOTA_ENABLE_TEST_DOUBLES=1 独立编译这两份源码。
+    if(NOT FOTA_ENABLE_TEST_DOUBLES)
+        target_sources(CcuFotaTests PRIVATE
+            src/ota/mock/scenario_script.cpp
+            src/daemon/mock_side_ports.cpp)
+    endif()
     target_link_libraries(CcuFotaTests
         PRIVATE
             ccu_fota_lib
@@ -154,6 +180,12 @@ if(FOTA_BUILD_TESTS)
             GTest::Main)
     # CR-009: tests compile with test doubles enabled (NON_PRODUCTION profile).
     target_compile_definitions(CcuFotaTests PRIVATE FOTA_ENABLE_TEST_DOUBLES=1)
+    # 告知测试“库”侧的构建口径（用于 OFF 构建拒绝 mock.enabled 的用例）。
+    if(FOTA_ENABLE_TEST_DOUBLES)
+        target_compile_definitions(CcuFotaTests PRIVATE FOTA_LIB_TEST_DOUBLES=1)
+    else()
+        target_compile_definitions(CcuFotaTests PRIVATE FOTA_LIB_TEST_DOUBLES=0)
+    endif()
     fota_apply_warnings(CcuFotaTests)
     add_test(NAME CcuFotaTests COMMAND CcuFotaTests)
 endif()
@@ -164,7 +196,15 @@ endif()
 # install-time network/device access, no absolute staging write, no
 # post-install service start/stop, no globbing whole config/ or tests/.
 # Dev fixtures (config/fota.yaml, config/common.yaml) are NOT installed.
+#
+# CCU-FOTA-DSN-CR-015 §D1：NON_PRODUCTION（FOTA_ENABLE_TEST_DOUBLES=ON）构建不生成
+# install 规则，从机制上保证 Mock 制品不进入量产 release-set / install component。
 # ============================================================================
+if(FOTA_ENABLE_TEST_DOUBLES)
+    message(WARNING
+        "FOTA_ENABLE_TEST_DOUBLES=ON: NON_PRODUCTION build - install rules are "
+        "disabled so Mock artifacts cannot enter the production component.")
+else()
 install(TARGETS ccu-fota
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT ccu-fota-runtime)
@@ -185,3 +225,4 @@ install(FILES config/fota.default.yaml
 install(FILES config/schema/fota.schema.yaml
     DESTINATION ${CMAKE_INSTALL_DATADIR}/ccu-fota/schema
     COMPONENT ccu-fota-runtime)
+endif()

@@ -295,6 +295,13 @@ FotaConfig FotaConfig::from(const ConfigSnapshot& s) {
             "fota.mock.enabled=true rejected in production build "
             "(FOTA_ENABLE_TEST_DOUBLES not defined)");
     }
+#else
+    // CCU-FOTA-DSN-CR-015 §D2：NON_PRODUCTION 启用 Mock 时场景必填。可读性与
+    // 场景校验由装配层（assembleMockVehiclePorts）在开放传输前 fail-closed。
+    if (c.mock.enabled && c.mock.scenarioPath.empty()) {
+        throw FotaConfigException(
+            "fota.mock.enabled=true requires fota.mock.scenario_path");
+    }
 #endif
 
     return c;

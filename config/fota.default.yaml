@@ -65,8 +65,8 @@ fota:
     require_clock_sync: true          # false 仅用于无授时服务的实验台
     clock_sync_poll_interval_ms: 1000 # 等待同步期间的轮询间隔 100..60000
     clock_min_valid_epoch_ms: 1735689600000  # 2025-01-01T00:00:00Z 合理性下限
-  mock:                              # CCU-FOTA-DSN-CR-009 测试桩
-    enabled: false                    # 量产必须 false
-    scenario_path: ""                 # Mock 场景脚本路径
-    virtual_clock: false              # 是否使用虚拟时钟
+  mock:                              # CCU-FOTA-DSN-CR-009/015 NON_PRODUCTION 联调
+    enabled: false                    # 量产必须 false；仅 ON 构建可启用（双重门禁）
+    scenario_path: ""                 # 启用时必填：场景（阶段/进度/故障），非任务事实
+    virtual_clock: false              # 真实链路必须 false；true 仅隔离测试
   log: {}                             # 服务级日志覆盖，字段由 ccu-framework-log schema 片段约束

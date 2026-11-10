@@ -1,0 +1,38 @@
+# =============================================================================
+# config/nonproduction/common.yaml - NON_PRODUCTION 真实链路 Mock 联调基线
+# (CCU-FOTA-DSN-CR-015 §D1/D2)
+# =============================================================================
+# 仅用于 NON_PRODUCTION（FOTA_ENABLE_TEST_DOUBLES=ON）独立构建目录的联调，
+# 不进入正式 install component / release-set。路径与字段保持标准命名：
+# common.store.root 使用量产标准值 /var/lib/ccu，运行前须确保可写（需要 root
+# 或已授权目录），不得通过改路径规避权限问题。
+# =============================================================================
+common:
+  log:
+    schema_version: 1
+    level: INFO
+    strict: false
+    async:
+      enabled: true
+      queue_size: 4096
+      flush_interval_ms: 1000
+    console:
+      enabled: true
+    file:
+      enabled: false
+      root: /var/log/ccu
+      max_file_size_mb: 20
+      max_files: 5
+      total_budget_mb: 100
+    redact:
+      identifiers: mask
+      payload_max_bytes: 256
+    format: standard
+  store:
+    root: /var/lib/ccu        # 运行状态持久化根 (CCU-FOTA-DSN-CR-005)，缺省 /var/lib/ccu
+  someip:
+    # SOME/IP Registry profile / 嵌入式路由由平台发布；联调环境按 Registry 填写。
+    registry_profile: ccu-fota
+    embedded_routing: false
+    call_timeout_ms: 3000
+    shutdown_timeout_ms: 5000

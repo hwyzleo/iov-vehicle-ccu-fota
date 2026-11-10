@@ -101,6 +101,14 @@ public:
     // 枚举/整数字段（u32be）。
     void writeEnumField(std::uint16_t fieldId, std::uint32_t code);
 
+    // 64 位无符号整数字段（u64be）。用于大小/偏移等超过 u32 的业务值
+    // (CCU-FOTA-DSN-CR-015 §D4 摘要规范化)。
+    void writeUint64Field(std::uint16_t fieldId, std::uint64_t value);
+
+    // 双精度浮点字段：写入 IEEE-754 bit pattern 的 u64be（不依赖 locale、
+    // 不做十进制格式化）(CCU-FOTA-DSN-CR-015 §D4)。
+    void writeDoubleField(std::uint16_t fieldId, double value);
+
     // 原始字节字段（present）。
     void writeBytesField(std::uint16_t fieldId, const std::uint8_t* data, std::size_t size);
 

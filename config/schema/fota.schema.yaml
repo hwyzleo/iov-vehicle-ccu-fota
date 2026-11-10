@@ -275,20 +275,30 @@ properties:
               时钟合理性下限（ms since epoch，缺省 2025-01-01T00:00:00Z）。
               CLOCK_REALTIME 早于该时刻一律视为未同步（RTC 未设置或掉电回落）。
       mock:
-        # CCU-FOTA-DSN-CR-009 测试桩配置（NON_PRODUCTION）
+        # CCU-FOTA-DSN-CR-009 / CR-015 §D1/D2 NON_PRODUCTION 联调配置
         type: object
         additionalProperties: false
         properties:
           enabled:
             type: boolean
             default: false
-            description: 量产必须 false；CCU-FOTA 运行时在非测试构建拒绝 true。
+            description: >
+              量产必须 false；仅 FOTA_ENABLE_TEST_DOUBLES=ON 的独立 NON_PRODUCTION
+              构建目录可设 true（构建 + 运行双重门禁）。OFF 构建在 true 时启动失败；
+              非量产制品不进入 ccu-fota-runtime install component / release-set。
           scenario_path:
             type: string
             default: ""
+            description: >
+              启用 Mock 时必填，且文件可读、场景校验通过。场景只描述安装阶段、
+              进度、结果与故障行为；ECU/包/版本等任务事实来自云端冻结任务，
+              不使用场景中的固定测试值。
           virtual_clock:
             type: boolean
             default: false
+            description: >
+              真实链路联调必须 false（daemon 直接拒绝 true）；true 仅允许隔离测试，
+              防止虚拟时间污染 Envelope TTL、安装窗口与 DIAG 登记时间语义。
 
 # -----------------------------------------------------------------------------
 # 秘密扫描策略：以下字段名在最终发布文件中出现即 fail-closed（CCU-BUILD 执行）。

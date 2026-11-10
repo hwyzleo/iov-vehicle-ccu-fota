@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <set>
 #include <memory>
 #include <sstream>
 
@@ -438,4 +439,115 @@ TEST(SystemClockSync, AcceptsPlausibleClockAndLatches) {
     auto second = p.status();
     EXPECT_TRUE(second.synchronized);
     EXPECT_STREQ(second.detail, "latched");
+}
+
+// ===========================================================================
+// CCU-FOTA-DSN-CR-015 §D5/D6 集成覆盖：失败/回滚终态不登记、执行中重启恢复
+// ===========================================================================
+
+// 15. 安装失败：最终结果非 SUCCEEDED，且不登记目标版本
+TEST(OtaIntegration, InstallFailedFinalResultIsFailedAndNotRegistered) {
+    MockHarness h;
+    h.init(scenarioWithFault("install_failed"));
+
+    auto last = h.runToTerminal(80);
+    EXPECT_TRUE(last.terminal) << "action=" << last.action << " err=" << last.error;
+    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Completed);
+    EXPECT_EQ(h.orch->executionState(), ExecutionState::Failed);
+
+    const auto fr = h.transport->lastFinalResult();
+    EXPECT_EQ(fr.result(), ::vehicle::fota::v1::RESULT_FAILED);
+    EXPECT_FALSE(fr.rollback_occurred());
+    ASSERT_GE(fr.ecu_results_size(), 1);
+    EXPECT_GE(fr.error_summary_size(), 1);
+    // 失败不登记（DIAG 版本事实保持不变）。
+    EXPECT_EQ(h.registrar->callCount, 0);
+    EXPECT_TRUE(h.registrar->applied.empty());
+}
+
+// 16. 回滚成功：最终结果 ROLLED_BACK，且不登记目标版本
+TEST(OtaIntegration, RollbackFinalResultIsRolledBackAndNotRegistered) {
+    MockHarness h;
+    h.init(scenarioWithFault("rollback_required"));
+
+    auto last = h.runToTerminal(80);
+    EXPECT_TRUE(last.terminal) << "action=" << last.action << " err=" << last.error;
+    EXPECT_EQ(h.orch->executionState(), ExecutionState::RolledBack);
+    const auto fr = h.transport->lastFinalResult();
+    EXPECT_EQ(fr.result(), ::vehicle::fota::v1::RESULT_ROLLED_BACK);
+    EXPECT_TRUE(fr.rollback_occurred());
+    EXPECT_EQ(h.registrar->callCount, 0);
+}
+
+// 17. 执行中重启：不重复创建 Execution / 不重复生成事件；恢复后同身份登记收口
+TEST(OtaIntegration, RestartDuringExecutionDoesNotDuplicateEventsOrRegistration) {
+    MockHarness h;
+    h.init(scenarioWithFault("event_drop"));
+
+    // 推进到 EXECUTING 且已产生事件（seq 2 被 BUFFERED，保持 PENDING）。
+    for (int i = 0; i < 60; ++i) {
+        h.orch->step();
+        if (h.orch->executionState() == ExecutionState::InstallStarted &&
+            h.orch->nextSequenceNo() > 2) {
+            break;
+        }
+    }
+    ASSERT_EQ(h.orch->executionState(), ExecutionState::InstallStarted);
+    const std::uint64_t eventsBefore = h.orch->nextSequenceNo();
+    const std::string executionId =
+        h.cloudStore->loadExecution().value_or(FotaExecutionRecord{}).executionId;
+    ASSERT_FALSE(executionId.empty());
+    EXPECT_EQ(h.registrar->callCount, 0);
+
+    // 模拟进程重启：复用同一 durable store 与 Fake DIAG 幂等状态。
+    h.restart(scenarioWithFault("event_drop"));
+    EXPECT_EQ(h.orch->executionState(), ExecutionState::InstallStarted);
+
+    // 恢复后的第一大步只补发既有 PENDING 事件，不重新生成阶段事件。
+    h.orch->step();
+    EXPECT_EQ(h.orch->nextSequenceNo(), eventsBefore)
+        << "resume must not regenerate execution events";
+    EXPECT_EQ(h.cloudStore->loadExecution().value_or(FotaExecutionRecord{}).executionId,
+              executionId);
+
+    auto last = h.runToTerminal(80);
+    EXPECT_TRUE(last.terminal) << "action=" << last.action << " err=" << last.error;
+    EXPECT_EQ(h.orch->executionState(), ExecutionState::Succeeded);
+    EXPECT_EQ(h.registrar->appliedCountTotal, 1);
+    EXPECT_EQ(h.registrar->duplicateCount, 0);
+    ASSERT_FALSE(h.registrar->calls.empty());
+    EXPECT_EQ(h.registrar->calls.front().executionId, executionId);
+
+    // 事件 outbox 中 eventId 唯一（恢复不产生重复业务事件）。
+    std::set<std::string> eventIds;
+    const std::uint64_t next = h.orch->nextSequenceNo();
+    for (std::uint64_t seq = 1; seq < next; ++seq) {
+        auto rec = h.cloudStore->loadEvent(seq);
+        if (!rec.has_value()) continue;
+        EXPECT_TRUE(eventIds.insert(rec->eventId).second)
+            << "duplicate eventId " << rec->eventId;
+    }
+}
+
+// 18. 连续两个任务：终态回到检测态后，第二个任务必须重新 prepare/start 执行器
+//     （防止沿用上一 Execution 的执行器上下文而跳过安装）。
+TEST(OtaIntegration, SecondTaskReinitializesExecutor) {
+    MockHarness h;
+    h.init(happyScenarioJson());
+
+    auto first = h.runToTerminal(80);
+    ASSERT_TRUE(first.terminal);
+    const std::uint64_t eventsAfterFirst = h.orch->nextSequenceNo();
+    ASSERT_EQ(h.registrar->appliedCountTotal, 1);
+
+    // 终态 -> 检测态，然后进入第二个任务（Fake 云端继续返回同一任务）。
+    auto reset = h.orch->step();
+    EXPECT_EQ(reset.action, "resetToDetection");
+
+    auto second = h.runToTerminal(80);
+    ASSERT_TRUE(second.terminal) << "action=" << second.action
+                                 << " err=" << second.error;
+    EXPECT_GT(h.orch->nextSequenceNo(), eventsAfterFirst)
+        << "second task must emit its own execution events";
+    EXPECT_EQ(h.registrar->appliedCountTotal, 2);
 }

@@ -4,6 +4,7 @@
 // =============================================================================
 
 #include "ccu/fota/ota/fota_orchestrator.hpp"
+#include "ccu/fota/ota/fota_digest.hpp"
 #include "ccu/fota/ota/inventory_error_codes.hpp"
 #include "ccu/fota/ota/state/state_proto.hpp"
 #include "ccu/fota/store/fota_cloud_state_serializer.hpp"
@@ -131,6 +132,9 @@ void FotaOrchestrator::loadFromStore() {
         executionId_ = ex->executionId;
         attemptNo_ = ex->attemptNo;
         installedVersionRegistrationId_ = ex->installedVersionRegistrationId;
+        // CR-015 §D5：恢复活动 Execution 时必须由本进程重新 prepare 执行器上下文
+        // （frozenTask 已随 fota.vehicle_task 持久化），不得直接使用空执行器状态。
+        executorPrepared_ = false;
         permit_.set_execution_id(ex->executionId);
         permit_.set_attempt_no(ex->attemptNo);
         permit_.set_permit_id(ex->permitId);
@@ -176,6 +180,7 @@ void FotaOrchestrator::resetTerminalToDetection() {
     executionId_.clear();
     attemptNo_ = 0;
     installedVersionRegistrationId_.clear();
+    executorPrepared_ = false;
     lastReceivedControlRev_ = 0;
     lastAppliedControlRev_ = 0;
     pendingControlIds_.clear();
@@ -190,16 +195,23 @@ void FotaOrchestrator::resetTerminalToDetection() {
 // ---------------------------------------------------------------------------
 // EventSink: 先 durable 写 outbox 单条 + 推进水位 meta，再分配 sequenceNo
 // ---------------------------------------------------------------------------
-bool FotaOrchestrator::emit(const ::vehicle::fota::v1::ExecutionEvent& evt) {
+bool FotaOrchestrator::emit(const ::vehicle::fota::v1::ExecutionEvent& event) {
     auto meta = store_.loadEventOutboxMeta().value_or(FotaEventOutboxMeta{});
     if (meta.nextSequenceNo - 1 >= cfg_.eventOutboxMax) return false;
 
+    // CR-015 §D4：eventDigest 由编排器统一计算（不信任执行器占位值），覆盖稳定
+    // 业务字段，不含本地 sequenceNo 分配状态；重发保持原摘要。
+    ::vehicle::fota::v1::ExecutionEvent evt = event;
+    if (evt.event_id().empty()) {
+        evt.set_event_id("EVT-seq-" + std::to_string(meta.nextSequenceNo));
+    }
+    evt.mutable_event_digest()->set_algorithm("sha-256");
+    evt.mutable_event_digest()->set_value_hex(digest::executionEventDigestHex(evt));
+
     FotaEventOutboxRecord e;
     e.sequenceNo = meta.nextSequenceNo;
-    e.eventId = evt.event_id().empty() ? ("EVT-" + std::to_string(e.sequenceNo))
-                                       : evt.event_id();
-    e.eventDigestHex = evt.event_digest().value_hex().empty()
-                           ? std::string(64, 'f') : evt.event_digest().value_hex();
+    e.eventId = evt.event_id();
+    e.eventDigestHex = evt.event_digest().value_hex();
     e.stage = evt.stage();
     e.eventStatus = evt.event_status();
     e.progress = evt.progress();
@@ -823,7 +835,8 @@ StepOutcome FotaOrchestrator::doPermit() {
     preq.set_task_revision(frozenTask_.task_revision());
     preq.set_install_plan_version(frozenTask_.install_plan_version());
     preq.mutable_package_manifest_digest()->set_algorithm("sha-256");
-    preq.mutable_package_manifest_digest()->set_value_hex(std::string(64, 'm'));
+    preq.mutable_package_manifest_digest()->set_value_hex(
+        digest::packageManifestDigestHex(frozenTask_));
     preq.set_consent_receipt_id(
         store_.loadConsent().value_or(FotaConsentRecord{}).receiptId);
     preq.mutable_local_readiness_digest()->set_algorithm("sha-256");
@@ -854,6 +867,8 @@ StepOutcome FotaOrchestrator::doPermit() {
     attemptNo_ = resp.has_attempt_no() ? resp.attempt_no() : 0;
     exState_ = ExecutionState::PermitPersisted;
     vtState_ = VehicleTaskState::Executing;
+    // 新 Execution 必须由本进程重新 prepare 执行器上下文（CR-015 §D5）。
+    executorPrepared_ = false;
     persistVehicleTask("permit");
     persistExecution();
 
@@ -879,10 +894,15 @@ StepOutcome FotaOrchestrator::doExecute() {
     StepOutcome o;
     o.action = "execute";
 
-    // 首次：prepare + start
-    if (exState_ == ExecutionState::PermitPersisted || exState_ == ExecutionState::Ready) {
-        // CCU-FOTA-DSN-CR-013 D7：安装开始前复检登记能力，不可用则不得起刷。
-        if (!registrationCapable(o, "execute")) {
+    // 首次（本进程首次进入执行）：prepare + start；恢复（安装已开始/结果待确认）：
+    // 先用持久化 frozenTask 重新 prepare，再按既有 checkpoint resume。
+    // 不得在重启后从空任务上下文生成空最终结果（CR-015 §D5）。
+    const bool freshStart = exState_ == ExecutionState::PermitPersisted ||
+                            exState_ == ExecutionState::Ready;
+    if (!executorPrepared_) {
+        // CCU-FOTA-DSN-CR-013 D7：仅新安装开始前复检登记能力（不可用则不得起刷）。
+        // 已开始的执行即使能力失效，仍按既有规则上报并在成功时等待登记。
+        if (freshStart && !registrationCapable(o, "execute")) {
             return o;
         }
         auto prep = exec_.prepare(frozenTask_);
@@ -890,13 +910,30 @@ StepOutcome FotaOrchestrator::doExecute() {
             o.error = "executor prepare failed: " + prep.reason;
             return o;
         }
-        auto st = exec_.start(permit_, *this);
-        if (!st.started) {
-            o.error = "executor start failed: " + st.reason;
-            return o;
+        if (freshStart) {
+            auto st = exec_.start(permit_, *this);
+            if (!st.started) {
+                o.error = "executor start failed: " + st.reason;
+                return o;
+            }
+            exState_ = ExecutionState::InstallStarted;
+            persistExecution();
+        } else {
+            auto ckpt = exec_.checkpoint();
+            auto rs = exec_.resume(ckpt, *this);
+            if (!rs.resumed) {
+                o.error = "executor resume failed: " + rs.reason;
+                return o;
+            }
+            FotaLogAdapter::orchestrator().info(
+                fota_events::OTA_EXECUTION_RESTORED,
+                "Execution context restored and resumed from checkpoint",
+                {flog::f_str("execution_id", executionId_),
+                 flog::f_int("attempt_no", static_cast<std::int64_t>(attemptNo_)),
+                 flog::f_str("execution_state",
+                             executionStateToString(exState_))});
         }
-        exState_ = ExecutionState::InstallStarted;
-        persistExecution();
+        executorPrepared_ = true;
     }
 
     // 发送 outbox 中 PENDING 事件，推进水位；BUFFERED/REJECTED/CONFLICT 下次补发
@@ -952,22 +989,50 @@ StepOutcome FotaOrchestrator::doFinalize() {
     o.action = "finalResult";
 
     auto finalData = exec_.readFinalResult();
+
+    // CR-015 §D5：总体 Result 由执行器最终 ECU 结果与回滚事实决定，不得固定为
+    // SUCCEEDED。全部成功（且未回滚）才 SUCCEEDED；任一失败 → FAILED；
+    // 回滚成功 → ROLLED_BACK。空 ECU 结果列表不得声称成功。
+    bool anyEcuFailed = false;
+    bool anyEcuRollback = false;
+    for (const auto& er : finalData.ecuResults) {
+        if (er.result() != ::vehicle::fota::v1::RESULT_SUCCEEDED) anyEcuFailed = true;
+        if (er.has_rollback_result()) anyEcuRollback = true;
+    }
+    const bool rollbackFacts = finalData.rollbackOccurred || anyEcuRollback ||
+                               exState_ == ExecutionState::Rollback;
+    const bool allSucceeded = !finalData.ecuResults.empty() && !anyEcuFailed &&
+                              !rollbackFacts;
+    const auto overallResult =
+        rollbackFacts ? ::vehicle::fota::v1::RESULT_ROLLED_BACK
+                      : (allSucceeded ? ::vehicle::fota::v1::RESULT_SUCCEEDED
+                                      : ::vehicle::fota::v1::RESULT_FAILED);
+
     ::vehicle::fota::v1::FinalResultReport fr;
     fr.set_final_sequence_no(acceptedSeq_);
     fr.set_last_received_control_revision(lastReceivedControlRev_);
     fr.set_last_applied_control_revision(lastAppliedControlRev_);
     for (const auto& id : pendingControlIds_) fr.add_pending_control_ids(id);
-    fr.mutable_result_digest()->set_algorithm("sha-256");
-    fr.mutable_result_digest()->set_value_hex(std::string(64, 'f'));
-    fr.set_result(exState_ == ExecutionState::Rollback
-                      ? ::vehicle::fota::v1::RESULT_ROLLED_BACK
-                      : ::vehicle::fota::v1::RESULT_SUCCEEDED);
-    fr.set_actual_baseline_code(finalData.actualBaselineCode);
+    fr.set_result(overallResult);
+    if (!finalData.actualBaselineCode.empty()) {
+        fr.set_actual_baseline_code(finalData.actualBaselineCode);
+    }
     fr.set_baseline_status(finalData.baselineStatus);
     for (const auto& er : finalData.ecuResults) *fr.add_ecu_results() = er;
     fr.set_started_at_ms(0);
     fr.set_completed_at_ms(nowMs());
-    fr.set_rollback_occurred(finalData.rollbackOccurred);
+    fr.set_rollback_occurred(finalData.rollbackOccurred || anyEcuRollback);
+    // 失败摘要：只含安全字段（ECU/stage/稳定错误码）。
+    for (const auto& er : finalData.ecuResults) {
+        if (er.result() == ::vehicle::fota::v1::RESULT_SUCCEEDED) continue;
+        auto* es = fr.add_error_summary();
+        es->set_ecu_id(er.ecu_id());
+        if (er.has_failure_stage()) es->set_stage(er.failure_stage());
+        if (!er.package_id().empty()) es->set_error_code("FOTA-INSTALL-FAILED");
+    }
+    // CR-015 §D4：结果摘要使用确定性规范化输入（不含序号/时间）。
+    fr.mutable_result_digest()->set_algorithm("sha-256");
+    fr.mutable_result_digest()->set_value_hex(digest::finalResultDigestHex(fr));
 
     ::vehicle::fota::v1::FinalResultResponse resp;
     try {
@@ -983,15 +1048,12 @@ StepOutcome FotaOrchestrator::doFinalize() {
         return o;  // 等待补事件或对账
     }
 
-    // CCU-FOTA-DSN-CR-013 D5：仅“成功安装且未被回滚”的执行需要登记。
+    // CCU-FOTA-DSN-CR-013 D5 / CR-015 §D6：仅“总体成功且未被回滚”的执行需要登记。
     // 失败/回滚成功不登记，按原终态规则收口。登记未完成时不得关闭 Execution。
-    const bool rolledBack =
-        fr.result() == ::vehicle::fota::v1::RESULT_ROLLED_BACK ||
-        finalData.rollbackOccurred || exState_ == ExecutionState::Rollback;
     const bool retryPendingTask =
         resp.vehicle_task_status() ==
         ::vehicle::fota::v1::VEHICLE_TASK_STATUS_RETRY_PENDING;
-    if (!rolledBack && !retryPendingTask) {
+    if (overallResult == ::vehicle::fota::v1::RESULT_SUCCEEDED && !retryPendingTask) {
         if (!registerInstalledVersions(o)) {
             o.vehicleTaskState = vtState_;
             o.executionState = exState_;
@@ -1003,17 +1065,34 @@ StepOutcome FotaOrchestrator::doFinalize() {
     doLogUpload();
 
     // 收口 Execution
-    exState_ = (resp.vehicle_task_status() == ::vehicle::fota::v1::VEHICLE_TASK_STATUS_RETRY_PENDING)
+    exState_ = retryPendingTask
                    ? ExecutionState::Failed
-                   : (fr.result() == ::vehicle::fota::v1::RESULT_ROLLED_BACK
+                   : (overallResult == ::vehicle::fota::v1::RESULT_ROLLED_BACK
                           ? ExecutionState::RolledBack
-                          : ExecutionState::Succeeded);
+                          : (overallResult ==
+                                     ::vehicle::fota::v1::RESULT_SUCCEEDED
+                                 ? ExecutionState::Succeeded
+                                 : ExecutionState::Failed));
     vtState_ = fromProtoVehicleTask(resp.vehicle_task_status());
     if (vtState_ == VehicleTaskState::None) {
         vtState_ = VehicleTaskState::Completed;
     }
     persistVehicleTask("finalResult");
     persistExecution();
+    FotaLogAdapter::orchestrator().info(
+        fota_events::OTA_FINAL_RESULT, "Final result assembled and accepted",
+        {flog::f_str("execution_id", executionId_),
+         flog::f_int("attempt_no", static_cast<std::int64_t>(attemptNo_)),
+         flog::f_str("result",
+                     overallResult == ::vehicle::fota::v1::RESULT_SUCCEEDED
+                         ? "SUCCEEDED"
+                         : (overallResult ==
+                                    ::vehicle::fota::v1::RESULT_ROLLED_BACK
+                                ? "ROLLED_BACK"
+                                : "FAILED")),
+         flog::f_int("ecu_result_count",
+                     static_cast<std::int64_t>(finalData.ecuResults.size())),
+         flog::f_str("registration_id", installedVersionRegistrationId_)});
     o.vehicleTaskState = vtState_;
     o.executionState = exState_;
     o.terminal = isTerminalVehicleTaskState(vtState_);
