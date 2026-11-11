@@ -5,7 +5,10 @@
 
 #include "ccu/fota/ota/someip_vehicle_message_transport.hpp"
 
+#include "fota_log_adapter.h"
+
 #include <algorithm>
+#include <cstdint>
 #include <utility>
 
 namespace ccu_fota {
@@ -49,6 +52,102 @@ bool decodeWire(const std::vector<std::uint8_t>& bytes, VehicleMessage& out) {
 
 bool expired(const VehicleMessageEnvelope& env) {
     return env.expire_at_ms() > 0 && env.expire_at_ms() < nowMs();
+}
+
+// ---------------------------------------------------------------------------
+// TBOX 通用 Method 响应帧（CCU-FOTA-DSN-CR-016 / TBOX-SOMEIP-DSN-CR-008）
+//
+// wire = outcome(1B) + error_code(2B, BE) + envelope_length(4B, BE)
+//        + response Envelope(envelope_length > 0)
+// 请求方向仍是单一序列化的 Envelope；响应方向必须消费该帧，不能把整个
+// Method 响应当裸 Envelope 解析。
+// ---------------------------------------------------------------------------
+constexpr std::size_t kResponseFrameHeaderBytes = 7;
+
+std::uint16_t readU16BE(const std::uint8_t* p) {
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(p[0]) << 8) |
+                                      static_cast<std::uint16_t>(p[1]));
+}
+
+std::uint32_t readU32BE(const std::uint8_t* p) {
+    return (static_cast<std::uint32_t>(p[0]) << 24) |
+           (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) |
+           static_cast<std::uint32_t>(p[3]);
+}
+
+TransportOutcome mapResponseOutcome(std::uint8_t raw) {
+    switch (raw) {
+        case 0: return TransportOutcome::Accepted;
+        case 1: return TransportOutcome::Rejected;
+        case 2: return TransportOutcome::Timeout;
+        case 3: return TransportOutcome::Unknown;
+        case 4: return TransportOutcome::Unavailable;
+        case 5: return TransportOutcome::VersionMismatch;
+        case 6: return TransportOutcome::PayloadTooLarge;
+        case 7: return TransportOutcome::ProtocolError;
+        case 8: return TransportOutcome::Stopping;
+        default: return TransportOutcome::Unknown;  // 未知不得视为成功
+    }
+}
+
+const char* outcomeName(TransportOutcome outcome) {
+    switch (outcome) {
+        case TransportOutcome::Accepted: return "Accepted";
+        case TransportOutcome::Rejected: return "Rejected";
+        case TransportOutcome::Timeout: return "Timeout";
+        case TransportOutcome::Unknown: return "Unknown";
+        case TransportOutcome::Unavailable: return "Unavailable";
+        case TransportOutcome::VersionMismatch: return "VersionMismatch";
+        case TransportOutcome::PayloadTooLarge: return "PayloadTooLarge";
+        case TransportOutcome::ProtocolError: return "ProtocolError";
+        case TransportOutcome::Stopping: return "Stopping";
+    }
+    return "Unknown";
+}
+
+struct ResponseFrameHeader {
+    bool ok = false;
+    TransportOutcome outcome = TransportOutcome::ProtocolError;
+    std::uint16_t errorCode = 0;
+    std::uint32_t envelopeLength = 0;
+    const char* reason = "frame_too_short";
+};
+
+ResponseFrameHeader parseResponseFrameHeader(const std::vector<std::uint8_t>& wire,
+                                             std::size_t maxEnvelopeBytes) {
+    ResponseFrameHeader h;
+    if (wire.size() < kResponseFrameHeaderBytes) {
+        h.reason = "frame_too_short";
+        h.outcome = TransportOutcome::ProtocolError;
+        return h;
+    }
+    h.errorCode = readU16BE(wire.data() + 1);
+    h.envelopeLength = readU32BE(wire.data() + 3);
+    h.outcome = mapResponseOutcome(wire[0]);
+    if (maxEnvelopeBytes > 0 && h.envelopeLength > maxEnvelopeBytes) {
+        h.outcome = TransportOutcome::PayloadTooLarge;
+        h.reason = "oversize";
+        return h;
+    }
+    if (wire.size() - kResponseFrameHeaderBytes < h.envelopeLength) {
+        h.outcome = TransportOutcome::ProtocolError;
+        h.reason = "truncated";
+        return h;
+    }
+    h.ok = true;
+    h.reason = "";
+    return h;
+}
+
+void logResponseFrameFailure(const ResponseFrameHeader& h, const std::string& payloadType) {
+    FotaLogAdapter::orchestrator().warn(
+        fota_events::CLOUD_TRANSPORT_FRAME,
+        "TBOX response frame rejected",
+        {flog::f_str("reason", h.reason),
+         flog::f_str("outcome", outcomeName(h.outcome)),
+         flog::f_int("tbox_error_code", static_cast<std::int64_t>(h.errorCode)),
+         flog::f_str("payload_type", payloadType)});
 }
 
 } // namespace
@@ -293,8 +392,35 @@ TransportResult<VehicleMessage> SomeIpVehicleMessageTransport::exchange(
         return {mapped, {}};
     }
 
+    // 响应方向是 TBOX VehicleMessageResponseFrame，不是裸 Envelope。
+    const std::size_t responseLimit =
+        opts.max_response_bytes > 0
+            ? std::min(opts.max_response_bytes, cfg_.maxEnvelopeBytes)
+            : cfg_.maxEnvelopeBytes;
+    ResponseFrameHeader frame =
+        parseResponseFrameHeader(result.response, responseLimit);
+    if (!frame.ok) {
+        logResponseFrameFailure(frame, msg.envelope.payload_type());
+        return {frame.outcome, {}};
+    }
+    if (frame.outcome != TransportOutcome::Accepted) {
+        frame.reason = "outcome_not_accepted";
+        logResponseFrameFailure(frame, msg.envelope.payload_type());
+        return {frame.outcome, {}};
+    }
+    if (frame.envelopeLength == 0) {
+        frame.reason = "empty_envelope";
+        logResponseFrameFailure(frame, msg.envelope.payload_type());
+        return {TransportOutcome::ProtocolError, {}};
+    }
+
+    std::vector<std::uint8_t> envelopeBytes(
+        result.response.begin() + kResponseFrameHeaderBytes,
+        result.response.begin() + kResponseFrameHeaderBytes + frame.envelopeLength);
     VehicleMessage resp;
-    if (!decodeWire(result.response, resp)) {
+    if (!decodeWire(envelopeBytes, resp)) {
+        frame.reason = "envelope_decode_failed";
+        logResponseFrameFailure(frame, msg.envelope.payload_type());
         return {TransportOutcome::ProtocolError, {}};
     }
     // 校验 response correlation_id == 请求 message_id；迟到/错配不完成调用。

@@ -558,6 +558,23 @@ StepOutcome FotaOrchestrator::doCheckTask() {
             req, makeCtx("checkTask-" + (localTaskId.empty() ? "initial" : localTaskId)));
     } catch (const FotaCloudException& e) {
         // 结果未知：保持 PREPARED，同身份退避重试（不得新分配 revision）。
+        // 可定位日志：区分 Timeout/Unavailable/Codec/Internal 与具体 codec 校验项，
+        // 不输出回执 payload/清单原值。
+        const char* kind = "Unknown";
+        switch (e.kind()) {
+            case FotaCloudException::Kind::Timeout: kind = "Timeout"; break;
+            case FotaCloudException::Kind::Unavailable: kind = "Unavailable"; break;
+            case FotaCloudException::Kind::Codec: kind = "Codec"; break;
+            case FotaCloudException::Kind::Internal: kind = "Internal"; break;
+        }
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::CLOUD_TRANSPORT_FAILED,
+            "Cloud TaskCheck exchange failed, inventory kept PREPARED",
+            {flog::f_str("kind", kind),
+             flog::f_str("error_code", e.frameworkCauseCode()),
+             flog::f_str("detail", e.what()),
+             flog::f_int("attempt", static_cast<std::int64_t>(prepared.attempt)),
+             flog::f_str("inventory_mode", prepared.mode)});
         try {
             planner_->onTransportFailure(ident, "FOTA-INVENTORY-TRANSPORT");
         } catch (const std::exception&) {

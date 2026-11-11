@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -111,6 +112,24 @@ someip_fw::Payload encodeWire(const VehicleMessage& msg) {
     return someip_fw::Payload(out.begin(), out.end());
 }
 
+// TBOX VehicleMessageResponseFrame（CCU-FOTA-DSN-CR-016）：
+// outcome(1B) + error_code(2B BE) + envelope_length(4B BE) + envelope。
+someip_fw::Payload encodeResponseFrame(std::uint8_t outcome, std::uint16_t errorCode,
+                                       const someip_fw::Payload& envelope) {
+    std::vector<std::uint8_t> out;
+    out.reserve(7 + envelope.size());
+    out.push_back(outcome);
+    out.push_back(static_cast<std::uint8_t>((errorCode >> 8) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>(errorCode & 0xFF));
+    const std::uint32_t len = static_cast<std::uint32_t>(envelope.size());
+    out.push_back(static_cast<std::uint8_t>((len >> 24) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((len >> 16) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((len >> 8) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>(len & 0xFF));
+    out.insert(out.end(), envelope.begin(), envelope.end());
+    return someip_fw::Payload(out.begin(), out.end());
+}
+
 // 合法 TaskCheckRequest payload（Fake 云侧会解析业务 proto）。
 std::string validTaskCheckPayload() {
     ::vehicle::fota::v1::TaskCheckRequest r;
@@ -140,6 +159,9 @@ struct EchoProvider {
     someip_fw::Provider provider;
     std::string wrongCorrelation;      // 非空则回显错误 correlation_id
     std::chrono::milliseconds delay{0};  // 响应前延迟
+    std::uint8_t outcome = 0;          // TBOX TransportOutcome，0=Accepted
+    std::uint16_t errorCode = 0;       // TBOX-SOMEIP-1001..1004，0=无错误
+    std::optional<someip_fw::Payload> rawResponse;  // 非空则直接返回该帧
     std::atomic<std::uint64_t> requestsSeen{0};
     // framework 的 event callback 在 executor 上延迟执行且引用 PayloadView；
     // 必须保持 wire 缓冲存活到回调执行完。
@@ -150,6 +172,9 @@ struct EchoProvider {
         ++requestsSeen;
         if (delay.count() > 0) {
             std::this_thread::sleep_for(delay);
+        }
+        if (rawResponse.has_value()) {
+            return someip_fw::MethodResult::ok(*rawResponse);
         }
         VehicleMessage req;
         if (v.data == nullptr || v.size == 0 ||
@@ -165,7 +190,8 @@ struct EchoProvider {
         resp.envelope.set_protocol_version(req.envelope.protocol_version());
         resp.envelope.set_timestamp_ms(nowMs());
         resp.payload = strToBytes(req.envelope.payload());
-        return someip_fw::MethodResult::ok(encodeWire(resp));
+        return someip_fw::MethodResult::ok(
+            encodeResponseFrame(outcome, errorCode, encodeWire(resp)));
     }
 
     void setup(someip_fw::SomeIpRuntime& r, someip_fw::Provider p) {
@@ -416,6 +442,93 @@ TEST(SomeIpTransportContract, CorrelationMismatchProtocolError) {
     auto r = h.transport->exchange(req, ExchangeOptions{}, makeCtx("corr"));
     EXPECT_EQ(r.outcome, TransportOutcome::ProtocolError);
     EXPECT_GT(h.echo.requestsSeen.load(), 0u);
+    h.transport->stop();
+    h.rt.stop();
+}
+
+// ===========================================================================
+// 4.1 TBOX 响应帧：outcome 映射（CCU-FOTA-DSN-CR-016）
+// ===========================================================================
+TEST(SomeIpTransportContract, ResponseFrameOutcomeMapping) {
+    SomeIpHarness h;
+    h.cfg.exchangeTimeout = std::chrono::milliseconds(2000);
+    h.setup();
+    struct Case {
+        std::uint8_t raw;
+        TransportOutcome expected;
+    };
+    const Case cases[] = {
+        {1, TransportOutcome::Rejected},
+        {2, TransportOutcome::Timeout},
+        {3, TransportOutcome::Unknown},
+        {4, TransportOutcome::Unavailable},
+        {5, TransportOutcome::VersionMismatch},
+        {6, TransportOutcome::PayloadTooLarge},
+        {7, TransportOutcome::ProtocolError},
+        {8, TransportOutcome::Stopping},
+        {0xFF, TransportOutcome::Unknown},  // 未知 outcome 不得视为成功
+    };
+    int i = 0;
+    for (const auto& c : cases) {
+        h.echo.outcome = c.raw;
+        h.echo.errorCode = 1003;
+        auto req = makeRequest(payload_type::kTaskCheckRequest, "p",
+                               "msg-frame-out-" + std::to_string(i++));
+        auto r = h.transport->exchange(req, ExchangeOptions{}, makeCtx("fo"));
+        EXPECT_EQ(r.outcome, c.expected) << "raw_outcome=" << static_cast<int>(c.raw);
+    }
+    h.transport->stop();
+    h.rt.stop();
+}
+
+// ===========================================================================
+// 4.2 TBOX 响应帧：Accepted + 空 Envelope -> ProtocolError
+// ===========================================================================
+TEST(SomeIpTransportContract, ResponseFrameAcceptedEmptyEnvelope) {
+    SomeIpHarness h;
+    h.cfg.exchangeTimeout = std::chrono::milliseconds(1000);
+    h.setup();
+    h.echo.outcome = 0;
+    h.echo.rawResponse = encodeResponseFrame(0, 0, {});
+    auto req = makeRequest(payload_type::kTaskCheckRequest, "p", "msg-frame-empty");
+    auto r = h.transport->exchange(req, ExchangeOptions{}, makeCtx("fe"));
+    EXPECT_EQ(r.outcome, TransportOutcome::ProtocolError);
+    h.transport->stop();
+    h.rt.stop();
+}
+
+// ===========================================================================
+// 4.3 TBOX 响应帧：过短 / 截断 / 超限
+// ===========================================================================
+TEST(SomeIpTransportContract, ResponseFrameMalformedAndOversize) {
+    SomeIpHarness h;
+    h.cfg.exchangeTimeout = std::chrono::milliseconds(1000);
+    h.cfg.maxEnvelopeBytes = 256;
+    h.setup();
+
+    // 帧过短（< 7 字节）。
+    h.echo.rawResponse = someip_fw::Payload{0x00, 0x00, 0x01};
+    auto req = makeRequest(payload_type::kTaskCheckRequest, "p", "msg-frame-short");
+    EXPECT_EQ(h.transport->exchange(req, ExchangeOptions{}, makeCtx("fs")).outcome,
+              TransportOutcome::ProtocolError);
+
+    // envelope_length 大于剩余字节 -> 截断。
+    someip_fw::Payload truncated{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10};  // len=16
+    h.echo.rawResponse = truncated;
+    auto req2 = makeRequest(payload_type::kTaskCheckRequest, "p", "msg-frame-trunc");
+    EXPECT_EQ(h.transport->exchange(req2, ExchangeOptions{}, makeCtx("ft")).outcome,
+              TransportOutcome::ProtocolError);
+
+    // envelope_length 超限 -> PayloadTooLarge。
+    someip_fw::Payload oversize{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20};  // len=32
+    oversize.resize(7 + 32, 0);
+    h.echo.rawResponse = oversize;
+    ExchangeOptions tiny;
+    tiny.max_response_bytes = 8;
+    auto req3 = makeRequest(payload_type::kTaskCheckRequest, "p", "msg-frame-big");
+    EXPECT_EQ(h.transport->exchange(req3, tiny, makeCtx("fb")).outcome,
+              TransportOutcome::PayloadTooLarge);
+
     h.transport->stop();
     h.rt.stop();
 }

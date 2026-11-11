@@ -9,8 +9,12 @@
 // TboxGenericTransportAddress 承载，来自 Registry/IDL/运行配置，fail-closed）。
 //
 // 语义约束（CR-010 §接口设计 / US-020~024）：
-//   * wire = 单一序列化的 vehicle.common.v1.VehicleMessageEnvelope（payload 字段
-//     承载不透明 vehicle.fota.v1 bytes）；本层不解析业务 payload。
+//   * 请求 wire = 单一序列化的 vehicle.common.v1.VehicleMessageEnvelope（payload
+//     字段承载不透明 vehicle.fota.v1 bytes）；本层不解析业务 payload。
+//   * 响应 wire = TBOX VehicleMessageResponseFrame：outcome(1B) +
+//     error_code(2B, BE) + envelope_length(4B, BE) + 可选 RESPONSE Envelope。
+//     必须先解帧，再按 outcome 映射；不得把整个 Method 响应当裸 Envelope
+//     （CCU-FOTA-DSN-CR-016 / TBOX-SOMEIP-DSN-CR-008）。
 //   * exchange/publish 只表示传输层受理，SOME/IP 成功 / TBOX accepted / MQTT
 //     PUBACK 不得映射为 FOTA 业务成功（业务成功由各 Response 业务字段表达）。
 //   * exchange 维护有界 in-flight correlation 表并校验 response correlation_id；

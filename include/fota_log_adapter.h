@@ -74,6 +74,10 @@ constexpr const char* STORE_SEQ_BLOCKED          = "fota.store.seq.blocked";
 // Cloud uplink gating（时钟门禁：上行绝对时间字段依赖可信系统时钟）
 constexpr const char* CLOUD_CLOCK_SYNC_PENDING   = "fota.cloud.clock_sync.pending";
 constexpr const char* CLOUD_CLOCK_SYNC_READY     = "fota.cloud.clock_sync.ready";
+// 传输/回执解码失败可定位原因：只记 kind / framework cause code / detail，不含 payload。
+constexpr const char* CLOUD_TRANSPORT_FAILED     = "fota.cloud.transport.failed";
+// TBOX 通用 Method 响应帧解析结果：只记 outcome/error_code/reason/payload_type。
+constexpr const char* CLOUD_TRANSPORT_FRAME      = "fota.cloud.transport.frame";
 // 车辆 VIN 未解析：契约 B Envelope 身份不完整，上行会被云侧判为契约错误，禁止启动。
 constexpr const char* CLOUD_VIN_UNRESOLVED       = "fota.cloud.vin.unresolved";
 } // namespace fota_events
