@@ -5,6 +5,8 @@
 
 #include "ccu/fota/daemon/fota_daemon.hpp"
 
+#include "ccu/fota/ota/state/vehicle_task_state.hpp"
+
 #include "ccu/fota/ota/payload_types.hpp"
 #include "fota_log_adapter.h"
 
@@ -180,6 +182,18 @@ void FotaDaemon::observeStep(const ota::StepOutcome& outcome) {
             "System clock synchronized, FOTA uplink resumed",
             {flog::f_int("waited_polls", static_cast<std::int64_t>(clockWaitPolls_))});
         clockWaitPolls_ = 0;
+    }
+    // step 失败必须可见：编排在各阶段（下载/安装许可/执行）大量 fail-closed，
+    // 之前失败只体现在返回值里，journal 无任何记录 —— 现场只能看到"不动了"
+    // （ORIN 实车 2026-11-12：停在 WaitingWindow 后连清单都不再上报且无日志）。
+    if (!outcome.error.empty()) {
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::TASK_STEP_FAILED,
+            "FOTA step failed",
+            {flog::f_str("action", outcome.action),
+             flog::f_str("detail", outcome.error),
+             flog::f_str("vehicle_task_state", vehicleTaskStateToString(outcome.vehicleTaskState)),
+             flog::f_bool("transport_failed", outcome.transportFailed)});
     }
 }
 

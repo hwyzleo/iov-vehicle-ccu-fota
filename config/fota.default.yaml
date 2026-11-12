@@ -24,7 +24,8 @@ fota:
     retry_backoff_ms: 1000            # 采集重试退避，非负
     registration:                     # 安装结果登记（CCU-FOTA-DSN-CR-013）
       enabled: true                   # 能力开关；false 只阻止新安装，不是跳过登记的开关
-      method_id: 0                    # Registry 分配的 METHOD_RECORD_INSTALLED_VERSIONS；
+      method_id: 5                    # Registry 分配的 METHOD_RECORD_INSTALLED_VERSIONS
+                                      # = 0x0005（CCU-DIAG constants.h 已实现并 offer）；
                                       # 0 = 尚未分配 -> 能力关闭（不得猜测 ID，
                                       # 未分配时不启用真实安装，读清单/上报不受影响）
       interface_major: 1              # CCU-DIAG 接口 major（不一致 fail-closed）

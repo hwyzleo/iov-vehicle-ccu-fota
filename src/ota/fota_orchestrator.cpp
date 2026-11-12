@@ -643,6 +643,34 @@ StepOutcome FotaOrchestrator::doCheckTask() {
     vtState_ = VehicleTaskState::Discovered;
     persistVehicleTask("checkTask");
 
+    // 任务快照内容门禁（fail-closed）：package_list 是车端下载/安装的唯一依据。
+    // 云端若下发空包清单，不得进入下载/安装阶段：否则 doDownload() 空循环 ->
+    // 假 READY -> WaitingWindow 被安装登记门禁永久挡住，不再 TaskCheck，
+    // 连本地清单都不再上报（ORIN 实车 2026-11-12 现场）。
+    // 保持在 Discovered（下一 tick 继续 TaskCheck），云端修正后自动恢复。
+    if (frozenTask_.package_list_size() == 0 || !resp.download_allowed()) {
+        const bool noPackage = frozenTask_.package_list_size() == 0;
+        FotaLogAdapter::orchestrator().error(
+            fota_events::TASK_SNAPSHOT_INVALID,
+            noPackage ? "Task snapshot has no package, download/install blocked"
+                      : "Cloud denied download, task kept in detection",
+            {flog::f_str("vehicle_task_id", frozenTask_.vehicle_task_id()),
+             flog::f_int("task_revision",
+                         static_cast<std::int64_t>(frozenTask_.task_revision())),
+             flog::f_int("package_count",
+                         static_cast<std::int64_t>(frozenTask_.package_list_size())),
+             flog::f_str("install_plan_version", frozenTask_.install_plan_version()),
+             flog::f_bool("download_allowed", resp.download_allowed()),
+             flog::f_str("deny_reason", resp.download_deny_reason()),
+             flog::f_str("error_code", noPackage ? "FOTA-TASK-SNAPSHOT-EMPTY"
+                                                 : "FOTA-TASK-DOWNLOAD-DENIED")});
+        o.error = noPackage
+                      ? "task snapshot has no package (FOTA-TASK-SNAPSHOT-EMPTY)"
+                      : "cloud denied download (FOTA-TASK-DOWNLOAD-DENIED)";
+        o.vehicleTaskState = vtState_;
+        return o;
+    }
+
     // 授权要求
     vtState_ = frozenTask_.consent_required()
                    ? VehicleTaskState::ConsentPending
@@ -713,6 +741,23 @@ StepOutcome FotaOrchestrator::doConsent() {
 StepOutcome FotaOrchestrator::doDownload() {
     StepOutcome o;
     o.action = "download";
+
+    // 自愈：durable 状态可能停在 DownloadPending/Downloading，但冻结任务从未含包
+    // （历史缺陷下空任务被当作"下载完成"）。无包不得继续，回退到任务检测，
+    // 保证本地清单能继续上报。
+    if (frozenTask_.package_list_size() == 0) {
+        FotaLogAdapter::orchestrator().error(
+            fota_events::TASK_SNAPSHOT_INVALID,
+            "Download stage reached with empty package list, back to detection",
+            {flog::f_str("vehicle_task_id", frozenTask_.vehicle_task_id()),
+             flog::f_int("package_count", static_cast<std::int64_t>(0)),
+             flog::f_str("error_code", "FOTA-TASK-SNAPSHOT-EMPTY")});
+        vtState_ = VehicleTaskState::Discovered;
+        persistVehicleTask("download");
+        o.error = "task snapshot has no package (FOTA-TASK-SNAPSHOT-EMPTY)";
+        o.vehicleTaskState = vtState_;
+        return o;
+    }
 
     bool allReady = true;
     for (const auto& pkg : frozenTask_.package_list()) {
@@ -821,6 +866,23 @@ StepOutcome FotaOrchestrator::doDownload() {
 // ---------------------------------------------------------------------------
 StepOutcome FotaOrchestrator::doPermit() {
     StepOutcome o;
+
+    // 自救 1：空任务不得被视为"下载完成 -> 可安装"，也不得一直停在 WaitingWindow。
+    // 回退到任务检测，保持清单上报（云端修正后自动恢复）。
+    if (frozenTask_.package_list_size() == 0) {
+        FotaLogAdapter::orchestrator().error(
+            fota_events::TASK_SNAPSHOT_INVALID,
+            "Permit stage reached with empty package list, back to detection",
+            {flog::f_str("vehicle_task_id", frozenTask_.vehicle_task_id()),
+             flog::f_int("package_count", static_cast<std::int64_t>(0)),
+             flog::f_str("error_code", "FOTA-TASK-SNAPSHOT-EMPTY")});
+        vtState_ = VehicleTaskState::Discovered;
+        persistVehicleTask("permit");
+        o.error = "task snapshot has no package (FOTA-TASK-SNAPSHOT-EMPTY)";
+        o.vehicleTaskState = vtState_;
+        return o;
+    }
+
     if (vtState_ == VehicleTaskState::Ready) {
         vtState_ = VehicleTaskState::WaitingWindow;
         persistVehicleTask("waitingWindow");
@@ -832,7 +894,23 @@ StepOutcome FotaOrchestrator::doPermit() {
 
     // CCU-FOTA-DSN-CR-013 D7：登记能力是安装前置。未分配/禁用/不可用时阻止
     // 新的安装（但清单读取与上报不受影响）；已启动的成功执行不在此路径。
+    // CR-013 D7 补充（本修复）：登记能力不可用属于"静态能力缺失"，不能把
+    // 状态机永久钉在 WaitingWindow —— 否则不再 TaskCheck（本地清单停止上报），
+    // 且现场看不出原因。因此记录可定位事件并回退到任务检测，保持清单上报；
+    // 能力恢复后下一轮 TaskCheck 会自动重新走到安装许可。
     if (!registrationCapable(o, "permit")) {
+        FotaLogAdapter::orchestrator().warn(
+            fota_events::TASK_REGISTRATION_BLOCKED,
+            "Install capability unavailable, back to detection to keep inventory reporting",
+            {flog::f_str("vehicle_task_id", frozenTask_.vehicle_task_id()),
+             flog::f_int("task_revision",
+                         static_cast<std::int64_t>(frozenTask_.task_revision())),
+             flog::f_str("from_state", vehicleTaskStateToString(vtState_)),
+             flog::f_str("error_code", "FOTA-TASK-REGISTRATION-BLOCKED")});
+        vtState_ = VehicleTaskState::Discovered;
+        persistVehicleTask("permit");
+        o.error = "installed version registration unavailable (FOTA-TASK-REGISTRATION-BLOCKED)";
+        o.vehicleTaskState = vtState_;
         return o;
     }
 

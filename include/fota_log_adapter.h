@@ -80,6 +80,14 @@ constexpr const char* CLOUD_TRANSPORT_FAILED     = "fota.cloud.transport.failed"
 constexpr const char* CLOUD_TRANSPORT_FRAME      = "fota.cloud.transport.frame";
 // 车辆 VIN 未解析：契约 B Envelope 身份不完整，上行会被云侧判为契约错误，禁止启动。
 constexpr const char* CLOUD_VIN_UNRESOLVED       = "fota.cloud.vin.unresolved";
+// 任务快照内容门禁：package_list 为空时下载/安装无法推进（车端必须 fail-closed）。
+// 只记 vehicle_task_id / task_revision / install_plan_version / download_allowed。
+constexpr const char* TASK_SNAPSHOT_INVALID      = "fota.task.snapshot.invalid";
+// 安装登记能力不可用（Registry 未分配 method id / 接口未就绪）：禁止新安装，
+// 但必须保持清单上报（回退到任务检测，不得静默停在 WaitingWindow）。
+constexpr const char* TASK_REGISTRATION_BLOCKED  = "fota.task.registration.blocked";
+// 单次 step 失败（action + error），避免编排失败静默无日志。
+constexpr const char* TASK_STEP_FAILED           = "fota.task.step.failed";
 } // namespace fota_events
 
 // ============================================================

@@ -324,11 +324,14 @@ TEST(InstalledVersionRegistration, UnavailableCapabilityBlocksNewInstallOnly) {
 
     // 清单已上报（读取/上报不受影响）。
     EXPECT_EQ(h.transport->inventoryVersionCount(), 1u);
-    // 但未开始安装：停在许可阶段，且云端未收到最终结果、无登记调用。
+    // 但未开始安装：云端未收到最终结果、无登记调用。
     EXPECT_FALSE(h.transport->finalAccepted());
-    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::WaitingWindow);
-    EXPECT_NE(last.error.find("installed version registration unavailable (install blocked)"),
-              std::string::npos)
+    // 2026-11-12 修复：登记能力不可用属于静态能力缺失，不得把状态机永久钉在
+    // WaitingWindow（那样不再 TaskCheck，本地清单会停止上报且现场无日志）。
+    // 新行为：记录 FOTA-TASK-REGISTRATION-BLOCKED 并回退 DISCOVERED，
+    // 保持清单上报，能力恢复后自动重新走到安装许可。
+    EXPECT_EQ(h.orch->vehicleTaskState(), VehicleTaskState::Discovered);
+    EXPECT_NE(last.error.find("FOTA-TASK-REGISTRATION-BLOCKED"), std::string::npos)
         << last.error;
     EXPECT_EQ(h.registrar->callCount, 0);
 }

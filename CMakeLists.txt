@@ -162,6 +162,7 @@ if(FOTA_BUILD_TESTS)
         tests/ota/fota_digest_test.cpp
         tests/ota/nonproduction_assembly_test.cpp
         tests/ota/mock_task_driven_test.cpp
+        tests/ota/task_snapshot_fail_closed_test.cpp
     )
     # Mock 场景/Mock 装配源码：仅在库未编译它们时由测试 target 自行编译
     # （OFF 构建的默认测试口径）。OFF 构建的 lib 不含 Mock 符号，测试 target
