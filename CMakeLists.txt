@@ -198,14 +198,24 @@ endif()
 # post-install service start/stop, no globbing whole config/ or tests/.
 # Dev fixtures (config/fota.yaml, config/common.yaml) are NOT installed.
 #
-# CCU-FOTA-DSN-CR-015 §D1：NON_PRODUCTION（FOTA_ENABLE_TEST_DOUBLES=ON）构建不生成
-# install 规则，从机制上保证 Mock 制品不进入量产 release-set / install component。
+# CCU-FOTA-DSN-CR-015 §D1：NON_PRODUCTION（FOTA_ENABLE_TEST_DOUBLES=ON）构建默认
+# 不生成 install 规则，从机制上保证 Mock 制品不进入量产 release-set / install component。
+# 联调/演示需要把 NON_PRODUCTION（Mock 下载/安装成功）制品交付到车辆时，必须由
+# BUILD 在服务清单的 cmake_cache_variables 中显式 opt-in：
+#   -DFOTA_ENABLE_TEST_DOUBLES=ON -DCCU_FOTA_MOCK_INSTALL=ON
+# 两个变量同时存在才会生成 install 规则，且构建日志显式留痕。
 # ============================================================================
-if(FOTA_ENABLE_TEST_DOUBLES)
+if(FOTA_ENABLE_TEST_DOUBLES AND NOT CCU_FOTA_MOCK_INSTALL)
     message(WARNING
         "FOTA_ENABLE_TEST_DOUBLES=ON: NON_PRODUCTION build - install rules are "
-        "disabled so Mock artifacts cannot enter the production component.")
+        "disabled so Mock artifacts cannot enter the production component. "
+        "Set -DCCU_FOTA_MOCK_INSTALL=ON to deliver a NON_PRODUCTION mock build.")
 else()
+if(FOTA_ENABLE_TEST_DOUBLES)
+    message(WARNING
+        "CCU_FOTA_MOCK_INSTALL=ON: installing NON_PRODUCTION (Mock download/install) "
+        "artifacts into component ccu-fota-runtime - development/verification only.")
+endif()
 install(TARGETS ccu-fota
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT ccu-fota-runtime)
